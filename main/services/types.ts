@@ -13,6 +13,8 @@ export interface SessionInfo {
   tool: ToolKind;
   /** OS process id when a live process was matched, otherwise null. */
   pid: number | null;
+  /** Controlling terminal of the process (e.g. "ttys004") when known. */
+  tty?: string | null;
   /** Working directory of the session. */
   cwd: string;
   /** Human-friendly project label (basename of cwd). */

@@ -6,11 +6,13 @@
  *   sessions:refresh             → SessionSnapshot (forces a fresh scan)
  *   sessions:set-refresh-interval ({ ms: number }) → { ms: number }
  *   sessions:get-refresh-interval → { ms: number }
+ *   sessions:focus-terminal      ({ id: string }) → { ok: boolean; reason?: string }
  */
 
 import { ipcMain, logger } from "@glaze/core/backend";
 
 import { sessionMonitor } from "../services/session-monitor.js";
+import type { FocusResult } from "../services/terminal-focus.js";
 import type { SessionSnapshot } from "../services/types.js";
 
 export function registerSessionHandlers(): void {
@@ -35,6 +37,22 @@ export function registerSessionHandlers(): void {
     logger.info("sessions", "Refresh interval updated", { ms });
     return { ms: sessionMonitor.getInterval() };
   });
+
+  ipcMain.handle("sessions:focus-terminal", async (_event, arg: unknown): Promise<FocusResult> => {
+    const id = readId(arg);
+    if (!id) {
+      throw new Error("sessions:focus-terminal requires { id: string }");
+    }
+    const result = await sessionMonitor.focusSession(id);
+    logger.info("sessions", "Focus terminal requested", { id, ok: result.ok, reason: result.reason });
+    return result;
+  });
+}
+
+function readId(arg: unknown): string | null {
+  if (!arg || typeof arg !== "object") return null;
+  const id = (arg as { id?: unknown }).id;
+  return typeof id === "string" && id.length > 0 ? id : null;
 }
 
 function readIntervalMs(arg: unknown): number | null {

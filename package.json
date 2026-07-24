@@ -3,7 +3,7 @@
   "name": "code-session-monitor",
   "version": "1.0.0",
   "productName": "Code Session Monitor",
-  "description": "Track coding environment status",
+  "description": "Real-time coding environment monitoring",
   "iconDescription": "A monitoring dashboard app that displays real-time status information for Claude Code, Code X, and Open Code development environments. Shows active sessions with their current states: idle, running, or waiting for approval. Think of a control room dashboard, status indicator lights, or a system monitor with multiple activity feeds.",
   "private": true,
   "type": "module",
@@ -61,6 +61,6 @@
     "host": {
       "minVersion": "0.11.1.0"
     },
-    "updatedAt": 1784879778189
+    "updatedAt": 1784884679063
   }
 }

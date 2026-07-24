@@ -22,65 +22,76 @@ export function toolLabel(tool: ToolKind): string {
   return TOOL_LABEL[tool];
 }
 
+/** Small monochrome tool glyph, used in group headers. */
+export function ToolIcon({ tool, className }: { tool: ToolKind; className?: string }) {
+  const Icon = TOOL_ICON[tool];
+  return <Icon className={className} />;
+}
+
+function shortModel(model: string): string {
+  return model.replace(/^claude-/, "").replace(/^anthropic\//, "");
+}
+
 function relativeTime(ms: number): string {
   if (!ms) return "";
   const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
-  if (s < 60) return `${s}s ago`;
+  if (s < 60) return `${s}s`;
   const m = Math.round(s / 60);
-  if (m < 60) return `${m}m ago`;
+  if (m < 60) return `${m}m`;
   const h = Math.round(m / 60);
-  if (h < 24) return `${h}h ago`;
-  return `${Math.round(h / 24)}d ago`;
+  if (h < 24) return `${h}h`;
+  return `${Math.round(h / 24)}d`;
 }
 
-/** A single session tile. Waiting sessions get a tinted surface to draw the eye. */
-export function SessionCard({ session }: { session: SessionInfo }) {
-  const Icon = TOOL_ICON[session.tool];
+/**
+ * A single session tile. Flat and airy: a hairline border, no fill, a subtle
+ * amber accent for the one state that needs attention. Clicking jumps to the
+ * session's terminal.
+ */
+export function SessionCard({ session, onFocus }: { session: SessionInfo; onFocus: (id: string) => void }) {
+  const meta = [session.gitBranch, session.model ? shortModel(session.model) : undefined].filter(Boolean);
 
   return (
-    <div
+    <button
+      type="button"
+      onClick={() => onFocus(session.id)}
+      title="Jump to terminal"
       className={cn(
-        "rounded-card p-4 flex flex-col gap-2 min-w-0",
-        session.state === "waiting" ? "bg-support-orange-10" : "bg-well",
+        "group relative text-left rounded-card border border-separator p-3.5 flex flex-col gap-2 min-w-0",
+        "transition-colors hover:bg-control-subtle hover:border-secondary",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent",
       )}
     >
-      <div className="flex items-center gap-2 min-w-0">
-        <Icon className="size-4 shrink-0 text-tertiary" />
+      {session.state === "waiting" && (
+        <span aria-hidden className="absolute left-0 top-3 bottom-3 w-0.5 rounded-full bg-support-orange-60" />
+      )}
+
+      <div className="flex items-baseline gap-2 min-w-0">
         <Text variant="strong" className="truncate">
           {session.project}
         </Text>
-      </div>
-
-      {(session.gitBranch || session.model) && (
-        <div className="flex items-center gap-1.5 min-w-0">
-          {session.gitBranch && (
-            <>
-              <GitBranch className="size-3.5 shrink-0 text-tertiary" />
-              <Text variant="small" color="tertiary" className="truncate">
-                {session.gitBranch}
-              </Text>
-            </>
-          )}
-          {session.model && (
-            <Text variant="small" color="tertiary" className="truncate">
-              {session.gitBranch ? `· ${session.model}` : session.model}
-            </Text>
-          )}
-        </div>
-      )}
-
-      <div className="flex items-center justify-between gap-2 mt-1">
-        <StatusPill state={session.state} />
-        <Text variant="small" color="tertiary" className="tabular-nums shrink-0">
+        <Text variant="small" color="tertiary" className="tabular-nums shrink-0 ml-auto">
           {relativeTime(session.lastActivity)}
         </Text>
       </div>
 
-      {session.lastMessage && (
-        <Text variant="small" color="secondary" className="truncate">
-          {session.lastMessage}
-        </Text>
+      {meta.length > 0 && (
+        <div className="flex items-center gap-1.5 min-w-0">
+          {session.gitBranch && <GitBranch className="size-3.5 shrink-0 text-tertiary" />}
+          <Text variant="small" color="tertiary" className="truncate">
+            {meta.join(" · ")}
+          </Text>
+        </div>
       )}
-    </div>
+
+      <div className="flex items-center gap-2 min-w-0 mt-0.5">
+        <StatusPill state={session.state} />
+        {session.lastMessage && (
+          <Text variant="small" color="tertiary" className="truncate min-w-0">
+            {session.lastMessage}
+          </Text>
+        )}
+      </div>
+    </button>
   );
 }

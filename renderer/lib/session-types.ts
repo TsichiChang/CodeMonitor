@@ -9,6 +9,7 @@ export interface SessionInfo {
   id: string;
   tool: ToolKind;
   pid: number | null;
+  tty?: string | null;
   cwd: string;
   project: string;
   gitBranch?: string;
@@ -24,6 +25,11 @@ export interface SessionSnapshot {
   counts: Record<SessionState, number>;
   generatedAt: number;
   processScanOk: boolean;
+}
+
+export interface FocusResult {
+  ok: boolean;
+  reason?: "not-found" | "no-process" | "unknown-terminal" | "activate-failed";
 }
 
 export function emptySnapshot(): SessionSnapshot {

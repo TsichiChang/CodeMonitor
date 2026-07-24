@@ -22,6 +22,7 @@ import { promisify } from "util";
 
 import { logger } from "@glaze/core/backend";
 
+import { focusTerminal, type FocusResult } from "./terminal-focus.js";
 import type { SessionInfo, SessionSnapshot, SessionState, ToolKind } from "./types.js";
 import { emptySnapshot } from "./types.js";
 
@@ -29,6 +30,8 @@ const execFileAsync = promisify(execFile);
 
 // ── Tunables ──────────────────────────────────────────────────────────
 const WRITING_MS = 4_000; // transcript touched this recently ⇒ actively working
+const APPROVAL_SUSPECT_MS = 45_000; // a tool_use sitting unanswered this long is likely blocked on approval
+const GENERATING_MAX_MS = 3 * 60_000; // model may think/stream this long after a prompt or tool result
 const WAITING_MAX_MS = 10 * 60_000; // beyond this, a stalled tool_use is treated as abandoned
 const ACTIVE_WINDOW_MS = 30 * 60_000; // transcripts older than this are hidden unless a live process backs them
 const TAIL_BYTES = 64 * 1024;
@@ -132,35 +135,42 @@ function classifyClaude(entry: Json | null, ageMs: number, live: boolean): Sessi
   const content = asArr(msg.content);
   const types = content.map((c) => asStr(asObj(c).type));
   const hasToolUse = types.includes("tool_use");
-  const hasToolResult = types.includes("tool_result");
+  const stopReason = asStr(msg.stop_reason);
 
-  if (role === "assistant" && hasToolUse) {
-    if (ageMs < WRITING_MS) return "running";
-    if (live || ageMs < WAITING_MAX_MS) return "waiting";
-    return "idle";
-  }
-  if (role === "user" && hasToolResult) {
-    return ageMs < WRITING_MS ? "running" : "idle";
-  }
   if (role === "assistant") {
-    // Completed a turn (text/thinking only) → awaiting the user.
-    return ageMs < WRITING_MS ? "running" : "idle";
+    // A pending tool call: the model has dispatched a tool but the result
+    // hasn't been written yet. The session is NOT idle — either the tool is
+    // executing (running) or the CLI is blocked on a permission prompt (waiting).
+    if (hasToolUse || stopReason === "tool_use") {
+      if (ageMs < APPROVAL_SUSPECT_MS) return "running"; // tool actively executing / just dispatched
+      if (live || ageMs < WAITING_MAX_MS) return "waiting"; // unanswered a long time → likely awaiting approval
+      return "idle"; // very stale → abandoned
+    }
+    // stop_reason end_turn / stop_sequence / max_tokens ⇒ the turn is complete.
+    if (stopReason === "end_turn" || stopReason === "stop_sequence" || stopReason === "max_tokens") {
+      return "idle"; // finished, awaiting the user's next prompt
+    }
+    // stop_reason null/other ⇒ the assistant response is still streaming.
+    return ageMs < APPROVAL_SUSPECT_MS ? "running" : "idle";
   }
+
   if (role === "user") {
-    // Prompt just submitted → the model should be responding.
-    return ageMs < WRITING_MS * 3 ? "running" : "idle";
+    // A tool result just came back, or the user just submitted a prompt — either
+    // way the model owns the next turn and is generating a response.
+    return live || ageMs < GENERATING_MAX_MS ? "running" : "idle";
   }
+
   return ageMs < WRITING_MS ? "running" : "idle";
 }
 
 function classifyCodex(entry: Json | null, ageMs: number, live: boolean): SessionState {
   const payloadType = asStr(asObj(entry?.payload).type) ?? asStr(entry?.type);
   if (payloadType === "task_complete") {
-    return ageMs < WRITING_MS ? "running" : "idle";
+    return ageMs < WRITING_MS ? "running" : "idle"; // turn done → awaiting the user
   }
-  // Any other trailing event means the turn is mid-flight.
-  if (ageMs < WRITING_MS) return "running";
-  if (live || ageMs < WAITING_MAX_MS) return "waiting";
+  // Any other trailing event means the turn is mid-flight (tool executing or generating).
+  if (ageMs < APPROVAL_SUSPECT_MS) return "running";
+  if (live || ageMs < WAITING_MAX_MS) return "waiting"; // stalled a long time → likely awaiting approval
   return "idle";
 }
 
@@ -202,12 +212,23 @@ interface LiveProc {
   tool: ToolKind;
   pid: number;
   cwd: string | null;
+  tty: string | null;
 }
 
+// The CLIs may run as native binaries (`codex`) or node/bun-wrapped scripts
+// (`node .../claude-code/cli.js`), so match both the bare command and the
+// package path forms.
 function toolFromCommand(command: string): ToolKind | null {
-  if (/(?:^|\/)codex(?:\s|$)/.test(command)) return "codex";
-  if (/(?:^|\/)opencode(?:\s|$)/.test(command)) return "opencode";
-  if (/(?:^|\/)claude(?:\s|$)/.test(command) || /\.claude\/local\/.*(cli|claude)/.test(command)) return "claude";
+  if (/(?:^|\/)codex(?:\s|$)/.test(command) || /codex-cli|openai[-/].*codex/i.test(command)) return "codex";
+  if (/(?:^|\/)opencode(?:\s|$)/.test(command) || /opencode[-/]/i.test(command)) return "opencode";
+  if (
+    /(?:^|\/)claude(?:\s|$)/.test(command) ||
+    /claude-code/i.test(command) ||
+    /anthropic[-/].*claude/i.test(command) ||
+    /\.claude\/local\//.test(command)
+  ) {
+    return "claude";
+  }
   return null;
 }
 
@@ -226,33 +247,35 @@ async function procCwd(pid: number): Promise<string | null> {
 async function scanProcesses(): Promise<{ procs: LiveProc[]; ok: boolean }> {
   let stdout: string;
   try {
-    ({ stdout } = await execFileAsync("/bin/ps", ["-axww", "-o", "pid=,command="], CHILD_OPTS));
+    ({ stdout } = await execFileAsync("/bin/ps", ["-axww", "-o", "pid=,tty=,command="], CHILD_OPTS));
   } catch (err) {
     logger.warn("session-monitor", "ps scan failed", { err: String(err) });
     return { procs: [], ok: false };
   }
 
-  const matched: { pid: number; tool: ToolKind }[] = [];
+  const matched: { pid: number; tty: string | null; tool: ToolKind }[] = [];
   for (const raw of stdout.split("\n")) {
     const line = raw.trim();
     if (!line) continue;
-    const sp = line.indexOf(" ");
-    if (sp <= 0) continue;
-    const pid = Number(line.slice(0, sp));
-    const command = line.slice(sp + 1);
+    // pid  tty  command…  (tty is "??" for processes with no controlling terminal)
+    const m = line.match(/^(\d+)\s+(\S+)\s+(.*)$/);
+    if (!m) continue;
+    const pid = Number(m[1]);
+    const tty = m[2] === "??" ? null : m[2];
+    const command = m[3];
     if (!Number.isFinite(pid)) continue;
     const tool = toolFromCommand(command);
-    if (tool) matched.push({ pid, tool });
+    if (tool) matched.push({ pid, tty, tool });
   }
 
   const procs = await Promise.all(
-    matched.map(async ({ pid, tool }) => ({ tool, pid, cwd: await procCwd(pid) })),
+    matched.map(async ({ pid, tty, tool }) => ({ tool, pid, tty, cwd: await procCwd(pid) })),
   );
   return { procs, ok: true };
 }
 
 // ── Claude Code collector ─────────────────────────────────────────────
-async function collectClaude(liveCwds: Map<string, number>): Promise<SessionInfo[]> {
+async function collectClaude(liveCwds: LiveCwdMap): Promise<SessionInfo[]> {
   const projectsDir = path.join(HOME, ".claude", "projects");
   let dirs: fs.Dirent[];
   try {
@@ -298,6 +321,7 @@ async function collectClaude(liveCwds: Map<string, number>): Promise<SessionInfo
       id: `claude:${cwd}:${newest.file.replace(/\.jsonl$/, "")}`,
       tool: "claude",
       pid: live?.pid ?? null,
+      tty: live?.tty ?? null,
       cwd,
       project: basename(cwd),
       gitBranch: asStr(entry?.gitBranch),
@@ -326,7 +350,7 @@ function codexDayDir(d: Date): string {
   return path.join(HOME, ".codex", "sessions", String(y), m, day);
 }
 
-async function collectCodex(liveCwds: Map<string, number>): Promise<SessionInfo[]> {
+async function collectCodex(liveCwds: LiveCwdMap): Promise<SessionInfo[]> {
   const now = Date.now();
   const today = new Date(now);
   const yesterday = new Date(now - 24 * 60 * 60 * 1000);
@@ -370,6 +394,7 @@ async function collectCodex(liveCwds: Map<string, number>): Promise<SessionInfo[
         id: `codex:${cwd}:${asStr(payload.id) ?? file}`,
         tool: "codex",
         pid: live?.pid ?? null,
+        tty: live?.tty ?? null,
         cwd,
         project: cwd === "unknown" ? "Codex session" : basename(cwd),
         gitBranch: asStr(git.branch),
@@ -411,6 +436,7 @@ async function collectOpencode(procs: LiveProc[], now: number): Promise<SessionI
         id: `opencode:${cwd}:${p.pid}`,
         tool: "opencode" as const,
         pid: p.pid,
+        tty: p.tty,
         cwd,
         project: cwd === "unknown" ? "OpenCode session" : basename(cwd),
         state: stateFor(),
@@ -439,9 +465,14 @@ async function collectOpencode(procs: LiveProc[], now: number): Promise<SessionI
 }
 
 // ── Merge helpers ─────────────────────────────────────────────────────
-function liveCwdMatch(liveCwds: Map<string, number>, cwd: string): { pid: number } | null {
-  const pid = liveCwds.get(cwd);
-  return pid === undefined ? null : { pid };
+interface LiveMatch {
+  pid: number;
+  tty: string | null;
+}
+type LiveCwdMap = Map<string, LiveMatch>;
+
+function liveCwdMatch(liveCwds: LiveCwdMap, cwd: string): LiveMatch | null {
+  return liveCwds.get(cwd) ?? null;
 }
 
 function dedupeNewestPerCwd(sessions: SessionInfo[]): SessionInfo[] {
@@ -471,13 +502,13 @@ class SessionMonitor {
       const now = Date.now();
       const { procs, ok } = await scanProcesses();
 
-      const liveByTool: Record<ToolKind, Map<string, number>> = {
+      const liveByTool: Record<ToolKind, LiveCwdMap> = {
         claude: new Map(),
         codex: new Map(),
         opencode: new Map(),
       };
       for (const p of procs) {
-        if (p.cwd) liveByTool[p.tool].set(p.cwd, p.pid);
+        if (p.cwd) liveByTool[p.tool].set(p.cwd, { pid: p.pid, tty: p.tty });
       }
 
       const [claude, codex, opencode] = await Promise.all([
@@ -497,6 +528,7 @@ class SessionMonitor {
           id: `${p.tool}:${p.cwd}:${p.pid}`,
           tool: p.tool,
           pid: p.pid,
+          tty: p.tty,
           cwd: p.cwd,
           project: basename(p.cwd),
           state: "running",
@@ -524,6 +556,26 @@ class SessionMonitor {
 
   getLatest(): SessionSnapshot {
     return this.latest;
+  }
+
+  /**
+   * Bring the terminal hosting a session to the front. Resolves the session's
+   * live process (re-scanning if the cached snapshot has no pid) and hands off
+   * to the terminal focus logic.
+   */
+  async focusSession(id: string): Promise<FocusResult> {
+    const session = this.latest.sessions.find((s) => s.id === id);
+    if (!session) return { ok: false, reason: "not-found" };
+
+    let pid = session.pid ?? null;
+    let tty = session.tty ?? null;
+    if (!pid) {
+      const { procs } = await scanProcesses();
+      const match = procs.find((p) => p.tool === session.tool && p.cwd === session.cwd);
+      pid = match?.pid ?? null;
+      tty = match?.tty ?? null;
+    }
+    return focusTerminal(pid, tty);
   }
 
   start(intervalMs: number, onUpdate: (snap: SessionSnapshot) => void): void {

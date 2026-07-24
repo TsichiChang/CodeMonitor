@@ -8,6 +8,7 @@
 
 import { Tray, Menu, logger, type MenuItemConstructorOptions } from "@glaze/core/backend";
 
+import { sessionMonitor } from "./services/session-monitor.js";
 import type { SessionSnapshot, SessionState } from "./services/types.js";
 
 const STATE_GLYPH: Record<SessionState, string> = {
@@ -68,9 +69,11 @@ function updateTray(snap: SessionSnapshot, onOpenDashboard: () => void): void {
     items.push({ label: "No active sessions", enabled: false });
   } else {
     for (const s of sessions.slice(0, 20)) {
+      const id = s.id;
       items.push({
         label: `${STATE_GLYPH[s.state]}  ${s.project} — ${STATE_LABEL[s.state]}`,
-        click: () => onOpenDashboard(),
+        // Clicking a session jumps to its terminal window/tab.
+        click: () => void sessionMonitor.focusSession(id),
       });
     }
   }
