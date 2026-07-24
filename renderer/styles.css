@@ -14,11 +14,11 @@
    background, so light/dark mode stay in sync automatically. Waiting
    breathes twice as fast as running to read as more urgent. */
 @keyframes breathe-green-light {
-  0%, 100% { background-color: var(--support-green-10); }
+  0%, 100% { background-color: var(--control-subtle); }
   50% { background-color: var(--support-green-20); }
 }
 @keyframes breathe-green-dark {
-  0%, 100% { background-color: var(--support-green-20); }
+  0%, 100% { background-color: var(--control-subtle); }
   50% { background-color: var(--support-green-40); }
 }
 @keyframes breathe-orange-light {
