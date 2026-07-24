@@ -44,14 +44,15 @@ function relativeTime(ms: number): string {
 }
 
 const STATE_BG: Record<SessionInfo["state"], string> = {
-  running: "bg-support-green-5 hover:bg-support-green-10",
-  waiting: "bg-support-orange-5 hover:bg-support-orange-10",
+  running: "bg-support-green-10 dark:bg-support-green-20 hover:bg-support-green-20 dark:hover:bg-support-green-40",
+  waiting: "bg-support-orange-10 dark:bg-support-orange-20 hover:bg-support-orange-20 dark:hover:bg-support-orange-40",
   idle: "bg-control-subtle hover:bg-control",
 };
 
 /**
  * A single session tile. Flat and airy: a hairline border, background tint
- * follows live state (green while running, amber while waiting). Height is
+ * follows live state (green while running, amber while waiting), stronger in
+ * dark mode where a light tint alone reads as invisible. Height is
  * fixed regardless of which optional fields a session has, so cards in a row
  * line up. Clicking jumps to the session's terminal.
  */
