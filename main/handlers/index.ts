@@ -8,6 +8,7 @@ import * as path from "path";
 import { fileURLToPath } from "url";
 
 import { appHandlers } from "./app.js";
+import { registerSessionHandlers } from "./sessions.js";
 import { getSettingsWindow, openSettingsWindow } from "../windows/settings-window.js";
 
 import { ipcMain, logger } from "@glaze/core/backend";
@@ -37,6 +38,9 @@ export function registerHandlers(): void {
   ipcMain.handle("window:closeSettings", async (_event) => {
     getSettingsWindow()?.close();
   });
+
+  // Session monitor handlers
+  registerSessionHandlers();
 
   logger.info("handlers", "✓ IPC handlers registered");
 

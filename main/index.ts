@@ -13,6 +13,8 @@ import { app, BrowserWindow, Menu, logger, initDevToolsButtonState } from "@glaz
 import { registerHandlers } from "./handlers/index.js";
 import { getPreloadPath, getWindowUrl } from "./windows/window-paths.js";
 import { openSettingsWindow } from "./windows/settings-window.js";
+import { sessionMonitor } from "./services/session-monitor.js";
+import { setupTray, destroyTray } from "./tray-controller.js";
 
 // Get directory paths
 const __filename = fileURLToPath(import.meta.url);
@@ -59,10 +61,12 @@ async function createMainWindow() {
   // In production: __dirname = build/main, package.json is at ../../package.json
   const packageJsonPath = path.join(__dirname, "..", "..", "package.json");
 
-  const minWindowWidth = 390;
-  const minWindowHeight = 456;
-  const windowWidth = 1000;
-  const windowHeight = 700;
+  // Sized for a compact secondary display (e.g. a 7" screen ~1024×600),
+  // while still usable on a normal desktop.
+  const minWindowWidth = 560;
+  const minWindowHeight = 420;
+  const windowWidth = 1024;
+  const windowHeight = 620;
   let windowTitle = "Glaze App";
 
   try {
@@ -135,6 +139,16 @@ async function createMainWindow() {
   });
 }
 
+// Show the dashboard window, creating (or recreating) it if needed.
+async function showDashboard() {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    await createMainWindow();
+  } else {
+    mainWindow.show();
+    mainWindow.focus();
+  }
+}
+
 // ── Application menu ──────────────────────────────────────────────────
 async function setupApplicationMenu() {
   await initDevToolsButtonState();
@@ -199,6 +213,8 @@ app.on("activate", (hasVisibleWindows) => {
 
 app.on("before-quit", () => {
   logger.info("main", "App before-quit, cleaning up...");
+  sessionMonitor.stop();
+  destroyTray();
 });
 
 // ── App ready ─────────────────────────────────────────────────────────
@@ -218,6 +234,11 @@ app.whenReady().then(async () => {
   await appAiDevHarness?.runAppAiAutotest();
 
   await setupApplicationMenu();
+
+  // Menu-bar tray + background session polling. The tray updater runs on every
+  // poll; the renderer polls the cached snapshot independently.
+  const updateTray = setupTray(() => void showDashboard());
+  sessionMonitor.start(2_000, updateTray);
 
   createMainWindow()
     .then(() => {

@@ -1,65 +1,79 @@
-// EXAMPLE VIEW - Replace this entire component
-//
-// This template uses IPC APIs with a secure preload pattern.
-//
-// === SECURITY MODEL ===
-// - Renderer code should NOT import ipcRenderer directly
-// - Use contextBridge in a preload script to expose specific APIs
-// - Channel names follow channel naming convention: "module:method" (e.g., "dialog:showOpenDialog")
-//
-// === PRELOAD SCRIPT (preload.ts) ===
-// ```
-// import { ipcRenderer, contextBridge } from '@glaze/core/preload';
-//
-// contextBridge.exposeInMainWorld('myAppAPI', {
-//   getInfo: () => ipcRenderer.invoke('app:getInfo'),
-//   saveFile: (name: string, data: string) => ipcRenderer.invoke('file:save', { name, data }),
-//   showOpenDialog: (options: any) => ipcRenderer.invoke('dialog:showOpenDialog', options),
-// });
-// ```
-//
-// === RENDERER CODE (your components) ===
-// ```
-// // Only use the exposed API - no direct ipcRenderer access
-// const info = await window.myAppAPI.getInfo();
-// await window.myAppAPI.saveFile('test.txt', 'hello');
-// const result = await window.myAppAPI.showOpenDialog({ properties: ['openFile'] });
-// ```
-//
-// === BACKEND HANDLERS (main/handlers/index.ts) ===
-// ```
-// import { ipcMain, dialog } from '@glaze/core/backend';
-//
-// // Custom handler
-// ipcMain.handle('app:getInfo', async () => {
-//   return { name: 'My App', version: '1.0.0' };
-// });
-//
-// // Built-in modules work directly through the Glaze APIs
-// // The native API handlers are already registered for:
-// //   dialog:showOpenDialog, dialog:showSaveDialog, dialog:showMessageBox
-// //   shell:openPath, shell:openExternal, shell:trashItem, shell:beep
-// //   screen:getPrimaryDisplay, screen:getAllDisplays, etc.
-// //   clipboard:readText, clipboard:writeText
-// //   nativeTheme:getInfo, nativeTheme:setThemeSource
-// //   Menu:setApplicationMenu, Menu:popup
-// ```
+import { Badge, EmptyState, ScrollArea, Separator, Text } from "@glaze/core/components";
 
-import { Toolbar, ToolbarContent, ToolbarTitle } from "@glaze/core/components";
+import { SessionCard, toolLabel } from "../components/session-card";
+import type { SessionInfo, ToolKind } from "../lib/session-types";
+import { useSnapshot } from "./use-snapshot";
 
-declare const __APP_DISPLAY_NAME__: string | undefined;
+const TOOL_ORDER: ToolKind[] = ["claude", "codex", "opencode"];
 
 export function HomeView() {
+  const { data } = useSnapshot();
+  const snapshot = data ?? {
+    sessions: [],
+    counts: { running: 0, waiting: 0, idle: 0 },
+    generatedAt: 0,
+    processScanOk: false,
+  };
+  const { sessions, counts } = snapshot;
+
+  const groups = TOOL_ORDER.map((tool) => ({
+    tool,
+    items: sessions.filter((s) => s.tool === tool),
+  })).filter((g) => g.items.length > 0);
+
   return (
-    <div className="h-full flex flex-col">
-      <Toolbar>
-        <ToolbarContent>
-          <ToolbarTitle>{/* Page title */}</ToolbarTitle>
-        </ToolbarContent>
-      </Toolbar>
-      <div className="h-full flex flex-col gap-2 w-full text-center absolute inset-0 justify-center items-center">
-        <h1 className="text-heading1 font-normal shimmer-text">{__APP_DISPLAY_NAME__ || "Glaze App"}</h1>
+    <ScrollArea
+      title="Code Sessions"
+      actions={
+        <div className="flex items-center gap-2">
+          <Badge color="green" size="medium">
+            {counts.running} running
+          </Badge>
+          <Badge color="orange" size="medium">
+            {counts.waiting} waiting
+          </Badge>
+          <Badge color="secondary" size="medium">
+            {counts.idle} idle
+          </Badge>
+        </div>
+      }
+      className="h-full"
+    >
+      <div className="relative min-h-full">
+        {sessions.length === 0 ? (
+          <EmptyState
+            title="No active sessions"
+            description="Start a Claude Code, Codex, or OpenCode session in a terminal and it will appear here."
+          />
+        ) : (
+          <div className="flex flex-col gap-6 p-4">
+            {groups.map((group) => (
+              <ToolGroup key={group.tool} tool={group.tool} items={group.items} />
+            ))}
+          </div>
+        )}
       </div>
-    </div>
+    </ScrollArea>
+  );
+}
+
+function ToolGroup({ tool, items }: { tool: ToolKind; items: SessionInfo[] }) {
+  return (
+    <section className="flex flex-col gap-3">
+      <div className="flex items-center gap-3">
+        <Text variant="strong" color="secondary" className="uppercase tracking-wide text-small-strong">
+          {toolLabel(tool)}
+        </Text>
+        <Text variant="small" color="tertiary" className="tabular-nums">
+          {items.length}
+        </Text>
+        <Separator className="flex-1" />
+      </div>
+      <div className="grid gap-3 grid-cols-[repeat(auto-fill,minmax(220px,1fr))]">
+        {items.map((session) => (
+          <SessionCard key={session.id} session={session} />
+        ))}
+      </div>
+    </section>
   );
 }
