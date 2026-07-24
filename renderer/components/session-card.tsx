@@ -44,17 +44,18 @@ function relativeTime(ms: number): string {
 }
 
 const STATE_BG: Record<SessionInfo["state"], string> = {
-  running: "bg-support-green-20 dark:bg-support-green-40 hover:bg-support-green-40 dark:hover:bg-support-green-60",
-  waiting: "bg-support-orange-10 dark:bg-support-orange-20 hover:bg-support-orange-20 dark:hover:bg-support-orange-40",
+  running: "bg-support-green-20 dark:bg-support-green-40 breathe-green",
+  waiting: "bg-support-orange-20 dark:bg-support-orange-40 breathe-orange",
   idle: "bg-control-subtle hover:bg-control",
 };
 
 /**
  * A single session tile. Flat and airy: a hairline border, background tint
- * follows live state (green while running, amber while waiting), a bold wash
- * in both modes so the state reads at a glance. Height is
- * fixed regardless of which optional fields a session has, so cards in a row
- * line up. Clicking jumps to the session's terminal.
+ * follows live state (green while running, amber while waiting), pulsing
+ * ("breathing") between two tint steps so the state reads at a glance even
+ * without hovering; waiting breathes faster than running for urgency. Height
+ * is fixed regardless of which optional fields a session has, so cards in a
+ * row line up. Clicking jumps to the session's terminal.
  */
 export function SessionCard({ session, onFocus }: { session: SessionInfo; onFocus: (id: string) => void }) {
   const meta = [session.gitBranch, session.model ? shortModel(session.model) : undefined].filter(Boolean);

@@ -8,3 +8,42 @@
 @source "./**/*.{ts,tsx}";
 @source not "./preload.ts";
 @source not "./dev/**/*";
+
+/* Breathing background for running/waiting session cards (session-card.tsx).
+   Pulses between two tint steps of the same token used for the resting
+   background, so light/dark mode stay in sync automatically. Waiting
+   breathes twice as fast as running to read as more urgent. */
+@keyframes breathe-green-light {
+  0%, 100% { background-color: var(--support-green-20); }
+  50% { background-color: var(--support-green-40); }
+}
+@keyframes breathe-green-dark {
+  0%, 100% { background-color: var(--support-green-40); }
+  50% { background-color: var(--support-green-60); }
+}
+@keyframes breathe-orange-light {
+  0%, 100% { background-color: var(--support-orange-20); }
+  50% { background-color: var(--support-orange-40); }
+}
+@keyframes breathe-orange-dark {
+  0%, 100% { background-color: var(--support-orange-40); }
+  50% { background-color: var(--support-orange-60); }
+}
+.breathe-green {
+  animation: breathe-green-light 2.4s ease-in-out infinite;
+}
+.dark .breathe-green {
+  animation-name: breathe-green-dark;
+}
+.breathe-orange {
+  animation: breathe-orange-light 1.2s ease-in-out infinite;
+}
+.dark .breathe-orange {
+  animation-name: breathe-orange-dark;
+}
+@media (prefers-reduced-motion: reduce) {
+  .breathe-green,
+  .breathe-orange {
+    animation: none;
+  }
+}
