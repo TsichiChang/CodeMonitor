@@ -77,64 +77,73 @@ async function findTerminalApp(pid: number): Promise<TermApp | null> {
   return null;
 }
 
-async function runOsa(script: string): Promise<boolean> {
+// Run an AppleScript and return its trimmed stdout, or null if it errored
+// (e.g. Automation permission denied). Selection scripts return "matched" when
+// they found and focused the target tab, "nomatch" otherwise.
+async function runOsaResult(script: string): Promise<string | null> {
   try {
-    await execFileAsync("/usr/bin/osascript", ["-e", script], OPTS);
-    return true;
+    const { stdout } = await execFileAsync("/usr/bin/osascript", ["-e", script], OPTS);
+    return stdout.trim();
   } catch (err) {
     logger.warn("terminal-focus", "osascript failed", { err: String(err) });
-    return false;
+    return null;
   }
+}
+
+// True if the app is running WITHOUT launching it (`is running` never launches).
+// Used to gate tty probes so we never spring an idle terminal to life.
+async function isRunning(appName: string): Promise<boolean> {
+  const res = await runOsaResult(`application "${appName}" is running`);
+  return res === "true";
 }
 
 function terminalAppScript(devTty: string): string {
   return [
     'tell application "Terminal"',
-    "  activate",
-    "  set matched to false",
     "  repeat with w in windows",
     "    repeat with t in tabs of w",
     "      try",
     `        if (tty of t) is "${devTty}" then`,
     "          set selected tab of w to t",
-    "          set index of w to 1",
-    "          set matched to true",
-    "          exit repeat",
+    "          try",
+    "            set index of w to 1",
+    "          end try",
+    "          activate",
+    '          return "matched"',
     "        end if",
     "      end try",
     "    end repeat",
-    "    if matched then exit repeat",
     "  end repeat",
     "end tell",
+    'return "nomatch"',
   ].join("\n");
 }
 
 function ottyScript(devTty: string): string {
   return [
     'tell application "Otty"',
-    "  activate",
-    "  set matched to false",
     "  repeat with w in windows",
     "    repeat with t in tabs of w",
     "      try",
     `        if (tty of t) is "${devTty}" then`,
     "          set selected of t to true",
-    "          set index of w to 1",
-    "          set matched to true",
-    "          exit repeat",
+    "          try",
+    "            set index of w to 1",
+    "          end try",
+    "          activate",
+    '          return "matched"',
     "        end if",
     "      end try",
     "    end repeat",
-    "    if matched then exit repeat",
     "  end repeat",
     "end tell",
+    'return "nomatch"',
   ].join("\n");
 }
 
 function itermScript(devTty: string): string {
   return [
     'tell application "iTerm"',
-    "  activate",
     "  repeat with w in windows",
     "    repeat with t in tabs of w",
     "      repeat with s in sessions of t",
@@ -143,14 +152,29 @@ function itermScript(devTty: string): string {
     "            select s",
     "            select t",
     "            tell w to select",
-    "            return",
+    "            activate",
+    '            return "matched"',
     "          end if",
     "        end try",
     "      end repeat",
     "    end repeat",
     "  end repeat",
     "end tell",
+    'return "nomatch"',
   ].join("\n");
+}
+
+function scriptFor(kind: TermApp["kind"], devTty: string): string | null {
+  switch (kind) {
+    case "terminal":
+      return terminalAppScript(devTty);
+    case "iterm":
+      return itermScript(devTty);
+    case "otty":
+      return ottyScript(devTty);
+    default:
+      return null;
+  }
 }
 
 export async function focusTerminal(pid: number | null, ttyHint?: string | null): Promise<FocusResult> {
@@ -160,18 +184,28 @@ export async function focusTerminal(pid: number | null, ttyHint?: string | null)
   const tty = ttyHint ?? (await ttyForPid(pid));
   const devTty = tty ? (tty.startsWith("/dev/") ? tty : `/dev/${tty}`) : null;
 
-  // Precise tab selection for the two scriptable terminals.
-  if (devTty && term?.kind === "terminal" && (await runOsa(terminalAppScript(devTty)))) {
-    return { ok: true };
-  }
-  if (devTty && term?.kind === "iterm" && (await runOsa(itermScript(devTty)))) {
-    return { ok: true };
-  }
-  if (devTty && term?.kind === "otty" && (await runOsa(ottyScript(devTty)))) {
-    return { ok: true };
+  // Precise tab selection driven by tty, NOT the process tree: terminals like
+  // Otty spawn shells from a daemon/CLI layer that is reparented away from the
+  // GUI process, so walking ppid never finds them. Instead we ask each running
+  // scriptable terminal whether it owns a tab with this tty. Only the true host
+  // matches (tty is unique), so non-hosts return "nomatch" without activating.
+  // Probe the process-tree-detected terminal first when it is scriptable, then
+  // the rest as a fallback.
+  if (devTty) {
+    const scriptable = TERMINALS.filter((t) => scriptFor(t.kind, devTty) !== null);
+    const ordered = term && scriptFor(term.kind, devTty) ? [term, ...scriptable.filter((t) => t !== term)] : scriptable;
+    for (const cand of ordered) {
+      if (!(await isRunning(cand.app))) continue;
+      const script = scriptFor(cand.kind, devTty);
+      if (!script) continue;
+      const res = await runOsaResult(script);
+      if (res === "matched") return { ok: true };
+      // "nomatch" → not the host, keep probing; null → script error (e.g.
+      // permission denied), fall through to the open -b fallback below.
+    }
   }
 
-  // Fallback: bring the hosting app to the front (no Automation prompt).
+  // Fallback: bring the hosting app to the front (no precise tab, no prompt).
   if (term) {
     try {
       await execFileAsync("/usr/bin/open", ["-b", term.bundleId], OPTS);
