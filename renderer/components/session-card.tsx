@@ -46,7 +46,7 @@ function relativeTime(ms: number): string {
 const STATE_BG: Record<SessionInfo["state"], string> = {
   running: "bg-support-green-5 hover:bg-support-green-10",
   waiting: "bg-support-orange-5 hover:bg-support-orange-10",
-  idle: "hover:bg-control-subtle",
+  idle: "bg-control-subtle hover:bg-control",
 };
 
 /**
