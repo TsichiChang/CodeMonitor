@@ -3,8 +3,8 @@
  *
  * Given the session's process id we walk up the process tree to find the
  * hosting terminal application, then:
- *  - Terminal.app / iTerm2: select the exact tab whose tty matches (AppleScript,
- *    which prompts for Automation permission the first time).
+ *  - Terminal.app / iTerm2 / Otty: select the exact tab whose tty matches
+ *    (AppleScript, which prompts for Automation permission the first time).
  *  - Any other known terminal: bring the app to the front via `open -b`
  *    (no permission prompt).
  */
@@ -27,14 +27,14 @@ interface TermApp {
   /** AppleScript application name. */
   app: string;
   bundleId: string;
-  kind: "terminal" | "iterm" | "generic";
+  kind: "terminal" | "iterm" | "otty" | "generic";
 }
 
 // Ordered most-specific first. `match` is tested against the full `ps` command.
 const TERMINALS: TermApp[] = [
   { match: /iTerm\.app|iTerm2/i, app: "iTerm", bundleId: "com.googlecode.iterm2", kind: "iterm" },
   { match: /Terminal\.app/i, app: "Terminal", bundleId: "com.apple.Terminal", kind: "terminal" },
-  { match: /[/\s]Otty(\s|$)/i, app: "Otty", bundleId: "io.appmakes.otty", kind: "generic" },
+  { match: /[/\s]Otty(\s|$)/i, app: "Otty", bundleId: "io.appmakes.otty", kind: "otty" },
   { match: /WezTerm|wezterm/i, app: "WezTerm", bundleId: "com.github.wez.wezterm", kind: "generic" },
   { match: /Ghostty/i, app: "Ghostty", bundleId: "com.mitchellh.ghostty", kind: "generic" },
   { match: /kitty/i, app: "kitty", bundleId: "net.kovidgoyal.kitty", kind: "generic" },
@@ -109,6 +109,28 @@ function terminalAppScript(devTty: string): string {
   ].join("\n");
 }
 
+function ottyScript(devTty: string): string {
+  return [
+    'tell application "Otty"',
+    "  activate",
+    "  set matched to false",
+    "  repeat with w in windows",
+    "    repeat with t in tabs of w",
+    "      try",
+    `        if (tty of t) is "${devTty}" then`,
+    "          set selected of t to true",
+    "          set index of w to 1",
+    "          set matched to true",
+    "          exit repeat",
+    "        end if",
+    "      end try",
+    "    end repeat",
+    "    if matched then exit repeat",
+    "  end repeat",
+    "end tell",
+  ].join("\n");
+}
+
 function itermScript(devTty: string): string {
   return [
     'tell application "iTerm"',
@@ -143,6 +165,9 @@ export async function focusTerminal(pid: number | null, ttyHint?: string | null)
     return { ok: true };
   }
   if (devTty && term?.kind === "iterm" && (await runOsa(itermScript(devTty)))) {
+    return { ok: true };
+  }
+  if (devTty && term?.kind === "otty" && (await runOsa(ottyScript(devTty)))) {
     return { ok: true };
   }
 
