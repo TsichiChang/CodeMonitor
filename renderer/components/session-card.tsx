@@ -43,10 +43,17 @@ function relativeTime(ms: number): string {
   return `${Math.round(h / 24)}d`;
 }
 
+const STATE_BG: Record<SessionInfo["state"], string> = {
+  running: "bg-support-green-5 hover:bg-support-green-10",
+  waiting: "bg-support-orange-5 hover:bg-support-orange-10",
+  idle: "hover:bg-control-subtle",
+};
+
 /**
- * A single session tile. Flat and airy: a hairline border, no fill, a subtle
- * amber accent for the one state that needs attention. Clicking jumps to the
- * session's terminal.
+ * A single session tile. Flat and airy: a hairline border, background tint
+ * follows live state (green while running, amber while waiting). Height is
+ * fixed regardless of which optional fields a session has, so cards in a row
+ * line up. Clicking jumps to the session's terminal.
  */
 export function SessionCard({ session, onFocus }: { session: SessionInfo; onFocus: (id: string) => void }) {
   const meta = [session.gitBranch, session.model ? shortModel(session.model) : undefined].filter(Boolean);
@@ -58,14 +65,11 @@ export function SessionCard({ session, onFocus }: { session: SessionInfo; onFocu
       title="Jump to terminal"
       className={cn(
         "group relative text-left rounded-card border border-separator p-3.5 flex flex-col gap-2 min-w-0",
-        "transition-colors hover:bg-control-subtle hover:border-secondary",
+        "transition-colors hover:border-secondary",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent",
+        STATE_BG[session.state],
       )}
     >
-      {session.state === "waiting" && (
-        <span aria-hidden className="absolute left-0 top-3 bottom-3 w-0.5 rounded-full bg-support-orange-60" />
-      )}
-
       <div className="flex items-baseline gap-2 min-w-0">
         <Text variant="strong" className="truncate">
           {session.project}
@@ -75,14 +79,14 @@ export function SessionCard({ session, onFocus }: { session: SessionInfo; onFocu
         </Text>
       </div>
 
-      {meta.length > 0 && (
-        <div className="flex items-center gap-1.5 min-w-0">
-          {session.gitBranch && <GitBranch className="size-3.5 shrink-0 text-tertiary" />}
+      <div className="flex items-center gap-1.5 min-w-0 min-h-3.5">
+        {session.gitBranch && <GitBranch className="size-3.5 shrink-0 text-tertiary" />}
+        {meta.length > 0 && (
           <Text variant="small" color="tertiary" className="truncate">
             {meta.join(" · ")}
           </Text>
-        </div>
-      )}
+        )}
+      </div>
 
       <div className="flex items-center gap-2 min-w-0 mt-0.5">
         <StatusPill state={session.state} />

@@ -34,6 +34,7 @@ interface TermApp {
 const TERMINALS: TermApp[] = [
   { match: /iTerm\.app|iTerm2/i, app: "iTerm", bundleId: "com.googlecode.iterm2", kind: "iterm" },
   { match: /Terminal\.app/i, app: "Terminal", bundleId: "com.apple.Terminal", kind: "terminal" },
+  { match: /[/\s]Otty(\s|$)/i, app: "Otty", bundleId: "io.appmakes.otty", kind: "generic" },
   { match: /WezTerm|wezterm/i, app: "WezTerm", bundleId: "com.github.wez.wezterm", kind: "generic" },
   { match: /Ghostty/i, app: "Ghostty", bundleId: "com.mitchellh.ghostty", kind: "generic" },
   { match: /kitty/i, app: "kitty", bundleId: "net.kovidgoyal.kitty", kind: "generic" },
