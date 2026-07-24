@@ -79,19 +79,30 @@ async function readHead(filePath: string, maxBytes = HEAD_BYTES): Promise<string
   }
 }
 
-function lastJsonLine(text: string): Json | null {
+function lastJsonLine(text: string, isValid?: (obj: Json) => boolean): Json | null {
   const lines = text.split("\n");
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i].trim();
     if (!line) continue;
+    let obj: Json;
     try {
-      return asObj(JSON.parse(line));
+      obj = asObj(JSON.parse(line));
     } catch {
       // The first line of a tail window can be truncated mid-record — skip it.
       continue;
     }
+    if (isValid && !isValid(obj)) continue;
+    return obj;
   }
   return null;
+}
+
+// Claude transcripts interleave bookkeeping records (type "last-prompt", "mode",
+// "system", ...) after the real conversation turn. Only "assistant"/"user"
+// entries carry a message + role, so classification must skip past the rest.
+function isClaudeMessageEntry(obj: Json): boolean {
+  const type = asStr(obj.type);
+  return type === "assistant" || type === "user";
 }
 
 function firstJsonLine(text: string): Json | null {
@@ -113,12 +124,12 @@ const codexMetaCache = new Map<string, Json | null>();
 // tail parse keyed by path+mtime → invalidated when the file grows.
 const tailCache = new Map<string, { mtimeMs: number; entry: Json | null }>();
 
-async function cachedTail(filePath: string, mtimeMs: number): Promise<Json | null> {
+async function cachedTail(filePath: string, mtimeMs: number, isValid?: (obj: Json) => boolean): Promise<Json | null> {
   const hit = tailCache.get(filePath);
   if (hit && hit.mtimeMs === mtimeMs) return hit.entry;
   let entry: Json | null = null;
   try {
-    entry = lastJsonLine(await readTail(filePath));
+    entry = lastJsonLine(await readTail(filePath), isValid);
   } catch {
     entry = null;
   }
@@ -311,7 +322,7 @@ async function collectClaude(liveCwds: LiveCwdMap): Promise<SessionInfo[]> {
 
     const filePath = path.join(dirPath, newest.file);
     const ageMs = now - newest.mtimeMs;
-    const entry = await cachedTail(filePath, newest.mtimeMs);
+    const entry = await cachedTail(filePath, newest.mtimeMs, isClaudeMessageEntry);
     // cwd: prefer the value recorded in the transcript, else decode the dir name.
     const cwd = asStr(entry?.cwd) ?? decodeClaudeCwd(entry, dir.name);
     const live = liveCwdMatch(liveCwds, cwd);
