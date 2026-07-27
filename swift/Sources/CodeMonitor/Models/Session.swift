@@ -85,10 +85,11 @@ struct SessionInfo: Identifiable, Sendable, Hashable {
   let project: String
   var gitBranch: String?
   var model: String?
+  /// What is known about this session. Everything below is derived from it.
+  var evidence: Evidence
+  /// Derived from `evidence` once per scan, by the scanner. Nothing else
+  /// assigns it — that is the whole point of ADR-0012.
   var state: SessionState
-  /// Whether `state` was reported by the tool itself rather than inferred from
-  /// timestamps. An inferred state is the weaker claim.
-  var stateIsAuthoritative = false
   /// Terminal tab hosting this session, when a hook was able to record one.
   var tabID: String?
   /// Pane within that tab. A tab can hold several sessions side by side, so
@@ -99,10 +100,18 @@ struct SessionInfo: Identifiable, Sendable, Hashable {
   var isDelegated = false
   /// Delegated agents currently working underneath this session.
   var subagentCount = 0
-  /// Whether a live agent process backs this session.
-  var live: Bool
-  /// Last observed activity (transcript mtime).
-  var lastActivity: Date
+  /// When this session was last observed doing anything.
+  var lastActivity: Date { evidence.at }
+
+  /// Whether this session's state is solid enough to animate a card for.
+  ///
+  /// A reported block means Claude Code fired `PermissionRequest`. An inferred
+  /// one means a tool call has been quiet for 45 seconds — a guess, and one
+  /// that has been wrong. The cost of a wrong guess should not be a pulsing
+  /// card demanding attention it has not earned (ADR-0012).
+  var deservesAttention: Bool {
+    state != .waiting || evidence.source == .reported
+  }
   /// Short human snippet describing the latest activity.
   var lastMessage: String?
 }

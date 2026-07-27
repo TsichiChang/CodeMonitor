@@ -1,8 +1,14 @@
 #!/bin/sh
 # Code Monitor — coding-agent state hook.
 #
-# Records what a session is doing, and where it is running, as a small JSON file
-# the dashboard reads (ADR-0010). One file per session, replaced in place.
+# Records what happened in a session, and where it is running, as a small JSON
+# file the dashboard reads (ADR-0010). One file per session, replaced in place.
+#
+# This reports the *event*, never what it means. Deciding that a `SessionStart`
+# is not activity, or which kind of `Notification` blocks the user, is the app's
+# job — it used to be encoded in this script's arguments, which made a line in
+# the user's settings.json the authoritative definition of a state and meant
+# every mis-reading had to be fixed by editing a file we do not own (ADR-0012).
 #
 # This runs inside the user's own agent session on every hook event, so it is
 # written to be fast and to fail silently: a broken hook would break the very
@@ -12,7 +18,8 @@
 # Usage (registered in a Claude Code settings.json hooks array):
 #     codemonitor-hook.sh <event-state> <agent-pid>
 #
-#   <event-state>  running | waiting | idle | ended
+#   <event-state>  only `ended` is acted on here — it removes the session's file
+#                  because no later event will. Any other value is ignored.
 #   <agent-pid>    the agent process's pid ($PPID at hook time)
 
 set -u
@@ -47,9 +54,8 @@ event=$(json_field hook_event_name)
 # ages out (ADR-0005).
 if [ "$event" = Notification ]; then
     case "$(json_field notification_type)" in
-        permission_prompt) state=waiting ;;
-        idle_prompt)       state=idle ;;
-        *)                 exit 0 ;;   # nothing about the session's state
+        permission_prompt|idle_prompt) event="Notification:$(json_field notification_type)" ;;
+        *) exit 0 ;;   # says nothing about the session
     esac
 fi
 
@@ -57,11 +63,11 @@ fi
 # yields and Claude fires Stop, even though the turn is not over. The still
 # running subagent is listed in the Stop payload, so treat that as activity
 # rather than reporting an idle state the user would see as "done".
-if [ "$state" = idle ]; then
+if [ "$event" = Stop ]; then
     compact=$(printf '%s' "$input" | tr -d ' \t\n')
     case "$compact" in
         *'"type":"subagent","status":"running"'*|*'"status":"running","type":"subagent"'*)
-            state=running ;;
+            event="Stop:subagent-running" ;;
     esac
 fi
 

@@ -30,7 +30,7 @@ struct SessionCardView: View {
       .contentShape(Rectangle())
     }
     .buttonStyle(.plain)
-    .modifier(BreathingBackground(state: session.state, scheme: scheme))
+    .modifier(BreathingBackground(session: session, scheme: scheme))
     .overlay(
       RoundedRectangle(cornerRadius: 10)
         .strokeBorder(isHovering ? Color.secondary.opacity(0.5) : Color.secondary.opacity(0.2))
@@ -145,16 +145,20 @@ struct SessionCardView: View {
 /// Pulses the card background between two tints of the same hue.
 /// Falls back to a static tint when the system asks for reduced motion.
 private struct BreathingBackground: ViewModifier {
-  let state: SessionState
+  let session: SessionInfo
   let scheme: ColorScheme
 
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @State private var lit = false
 
   func body(content: Content) -> some View {
-    let breath = Palette.breath(for: state, scheme: scheme)
+    let breath = Palette.breath(for: session.state, scheme: scheme)
+    // A guessed block does not get to pulse. Reported `waiting` means Claude
+    // Code fired `PermissionRequest`; inferred means a tool call has been quiet
+    // for 45 seconds, and that guess has been wrong (ADR-0012).
+    let animates = session.deservesAttention
     content.background {
-      if let breath, !reduceMotion {
+      if let breath, animates, !reduceMotion {
         Rectangle()
           .fill(lit ? breath.to : breath.from)
           // Scoped to `lit`, deliberately. `PhaseAnimator` was doing this job

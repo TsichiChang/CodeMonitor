@@ -1,8 +1,9 @@
 /// Collects sessions from every tool and merges them into one snapshot.
 ///
 /// Reading each tool's store is the sources' job (ADR-0004); this type decides
-/// what the set of them adds up to — attaching live processes, ordering by
-/// urgency, and counting.
+/// what the set of them adds up to. It gathers evidence — what each source saw,
+/// what any hook reported, whether a process is alive — and derives state from
+/// it exactly once, at the end (ADR-0012).
 ///
 /// Being an `actor` both protects the sources' caches and serialises scans, so
 /// a slow cycle can never overlap the next.
@@ -19,12 +20,17 @@ actor SessionScanner {
     let (processes, scanOK) = ProcessScanner.scan()
 
     var sessions = sources.flatMap { $0.sessions(now: now) }
-    applyReportedState(to: &sessions)
-    attachLiveProcesses(processes, to: &sessions)
-    sessions = sessions.filter { stillCurrent($0, now: now) }
-    sessions += unmatchedProcesses(processes, sessions: sessions, now: now)
-
+    applyReports(to: &sessions)
+    applyLiveness(processes, scanSucceeded: scanOK, to: &sessions)
+    sessions = sessions.filter { $0.evidence.isCurrent(now: now) }
+    sessions += unmatchedProcesses(processes, sessions: sessions, scanSucceeded: scanOK)
     sessions = foldDelegated(sessions)
+
+    // The single derivation. Nothing above this line decides a state, and
+    // nothing below it changes evidence.
+    for index in sessions.indices {
+      sessions[index].state = sessions[index].evidence.state(now: now)
+    }
 
     sessions.sort { lhs, rhs in
       lhs.state.order != rhs.state.order
@@ -43,35 +49,29 @@ actor SessionScanner {
     )
   }
 
-  /// Replaces inferred state with what a tool reported about itself, where a
-  /// hook has said anything (ADR-0010).
+  // MARK: - Reported evidence
+
+  /// Replaces inferred evidence with what a tool said about itself (ADR-0010).
   ///
-  /// The difference is not cosmetic. Inferred `waiting` means "a tool call has
-  /// sat unanswered for 45 seconds, which usually means a permission prompt";
-  /// reported `waiting` means Claude Code fired `PermissionRequest`. Only the
-  /// second is worth interrupting someone over.
-  ///
-  /// A hook also knows things no amount of scanning can recover — which
-  /// terminal tab the session lives in, and its pid without a directory guess.
-  private func applyReportedState(to sessions: inout [SessionInfo]) {
+  /// A hook also knows things no amount of scanning can recover: the pane its
+  /// session lives in, and its pid without a directory guess.
+  private func applyReports(to sessions: inout [SessionInfo]) {
     let reported = HookStateStore.states()
     guard !reported.isEmpty else { return }
 
     var unclaimed = reported
     for index in sessions.indices {
       guard let hook = unclaimed.removeValue(forKey: sessions[index].id) else { continue }
-      sessions[index].state = hook.state
-      sessions[index].stateIsAuthoritative = true
+      sessions[index].evidence = Evidence(
+        hook.activity,
+        // A hook fires on events a transcript write does not always follow, so
+        // its timestamp can be the fresher of the two.
+        at: max(sessions[index].evidence.at, hook.updated),
+        source: .reported
+      )
       sessions[index].tabID = hook.tabID
       sessions[index].paneID = hook.paneID
-      if let pid = hook.pid, ProcessScanner.isRunning(pid) {
-        sessions[index].pid = pid
-        sessions[index].live = true
-      }
       if let tty = hook.tty { sessions[index].tty = tty }
-      // A hook fires on events a transcript write does not always follow, so
-      // its timestamp can be the fresher of the two.
-      sessions[index].lastActivity = max(sessions[index].lastActivity, hook.updated)
     }
 
     // A report with no matching session is still a session. Its store may be
@@ -88,114 +88,60 @@ actor SessionScanner {
           projectPath: hook.cwd,
           workingDirectory: hook.cwd,
           project: URL(fileURLWithPath: hook.cwd).lastPathComponent,
-          state: hook.state,
-          stateIsAuthoritative: true,
+          evidence: Evidence(hook.activity, at: hook.updated, source: .reported),
+          state: .idle,
           tabID: hook.tabID,
-          paneID: hook.paneID,
-          // Checked, not assumed. A hook removes its file on `SessionEnd`, but
-          // a killed agent never gets to run that — so a report can name a pid
-          // that died long ago, and trusting it would keep the session on
-          // screen for good.
-          live: hook.pid.map(ProcessScanner.isRunning) ?? false,
-          lastActivity: hook.updated
+          paneID: hook.paneID
         )
       )
     }
   }
 
-  /// Replaces delegated agents with a count on the session they belong to.
-  ///
-  /// A program that farms work out to sub-agents produces one transcript per
-  /// agent, and each of those looks exactly like a session: 26 of them appeared
-  /// under one project here against 9 sessions actually opened by hand. Listing
-  /// them individually buries the sessions a person is actually sitting in
-  /// front of, which is the one thing this display must not do (ADR-0007).
-  ///
-  /// They are attributed by project directory. Nothing in a transcript names
-  /// the session that spawned it, and the directory is the only thing they
-  /// demonstrably share.
-  private func foldDelegated(_ sessions: [SessionInfo]) -> [SessionInfo] {
-    guard !UserDefaults.standard.bool(forKey: "showDelegatedSessions") else { return sessions }
-    let delegated = sessions.filter(\.isDelegated)
-    guard !delegated.isEmpty else { return sessions }
+  // MARK: - Liveness
 
-    var runningByProject: [String: Int] = [:]
-    for agent in delegated where agent.state == .running {
-      runningByProject[agent.projectPath, default: 0] += 1
-    }
-
-    var kept = sessions.filter { !$0.isDelegated }
-    for index in kept.indices {
-      kept[index].subagentCount = runningByProject[kept[index].projectPath] ?? 0
-    }
-
-    // A batch with no session of its own to hang off still deserves to be
-    // visible — otherwise the work would vanish from the display entirely.
-    let adopted = Set(kept.map(\.projectPath))
-    for (project, count) in runningByProject where !adopted.contains(project) {
-      guard var orphan = delegated.first(where: { $0.projectPath == project }) else { continue }
-      orphan.subagentCount = count
-      orphan.isDelegated = false
-      kept.append(orphan)
-    }
-    return kept
-  }
-
-  /// Whether a session still belongs on screen (ADR-0005).
-  ///
-  /// A live process overrides the clock entirely: a store can be quiet for
-  /// hours while its agent sits there perfectly alive, and dropping such a
-  /// session would replace a card carrying its branch, model and last action
-  /// with nothing at all.
-  private func stillCurrent(_ session: SessionInfo, now: Date) -> Bool {
-    if session.live { return true }
-
-    // No process. A session cannot be blocked on your approval when the agent
-    // that would act on your answer is gone, so `waiting` loses the exemption
-    // that otherwise keeps it on screen forever (ADR-0005) — that exemption is
-    // for sessions genuinely sitting there, and this one is not.
-    //
-    // We cannot prove a process belongs to a given session (ADR-0002), but the
-    // absence of any matching process is good evidence of death, and it is the
-    // only evidence available. The cost is that a session whose process exists
-    // yet went unmatched — two sessions in one directory, only one of which can
-    // be given the pid — ages out early. A hook reports its own pid and is not
-    // subject to that.
-    return now.timeIntervalSince(session.lastActivity) <= Aging.windowWithoutProcess
-  }
-
-  /// Attaches a live process to each session it plausibly belongs to.
+  /// Records whether a process backs each session.
   ///
   /// Matching is on the Project, not the working directory. An agent process
   /// keeps the directory it was launched in — it does not follow the session
   /// when the session moves — so its cwd is the Project even for a session
   /// whose transcript now reports somewhere else.
   ///
-  /// A process is never proof of *which* session it is (ADR-0002) — several
-  /// sessions can share a directory — so this is a decoration, not an identity.
-  private func attachLiveProcesses(_ processes: [LiveProcess], to sessions: inout [SessionInfo]) {
-    // A process a hook has already spoken for is off the table. The hook knows
-    // which session its process is running; nothing out here does, and letting
-    // the directory guess below reach the same pid would hand it to a second
-    // session as well — which is how a finished session stayed on screen,
-    // propped up by a process that belonged to its successor.
-    let spokenFor = Set(sessions.filter(\.stateIsAuthoritative).compactMap(\.pid))
-    let remaining = processes.filter { !spokenFor.contains($0.pid) }
-    let claimed = Set(sessions.indices.filter { sessions[$0].stateIsAuthoritative })
+  /// A process is never proof of *which* session it is (ADR-0002), so this is
+  /// a decoration and a lifetime signal, never an identity.
+  private func applyLiveness(
+    _ processes: [LiveProcess], scanSucceeded: Bool, to sessions: inout [SessionInfo]
+  ) {
+    guard scanSucceeded else {
+      // Nothing was observed, which is not the same as observing nothing.
+      for index in sessions.indices { sessions[index].evidence.liveness = .unknown }
+      return
+    }
+    for index in sessions.indices { sessions[index].evidence.liveness = .absent }
+
+    // A pid a hook named is checked directly — no guessing needed, and no other
+    // session may then claim it.
+    var spokenFor = Set<Int32>()
+    for index in sessions.indices {
+      guard sessions[index].evidence.source == .reported,
+        let pid = sessions[index].pid, ProcessScanner.isRunning(pid)
+      else { continue }
+      sessions[index].evidence.liveness = .alive
+      spokenFor.insert(pid)
+    }
 
     var byDirectory: [ToolKind: [String: LiveProcess]] = [:]
-    for process in remaining {
+    for process in processes where !spokenFor.contains(process.pid) {
       guard let cwd = process.cwd else { continue }
       byDirectory[process.tool, default: [:]][cwd] = process
     }
 
     // One process backs at most one session. A directory often holds several
-    // transcripts — one project here had three — and attaching the process to
-    // all of them would both claim a pid that is not theirs and, because a live
-    // session never ages out, keep every past session in that directory on
-    // screen forever. The most recently active one is the best available guess.
+    // transcripts — one project here had three — and giving the process to all
+    // of them would keep every past session in that directory on screen for as
+    // long as any agent ran there. The most recently active one is the best
+    // available guess.
     var bestIndex: [String: Int] = [:]
-    for index in sessions.indices where !claimed.contains(index) {
+    for index in sessions.indices where sessions[index].evidence.liveness != .alive {
       let session = sessions[index]
       guard byDirectory[session.tool]?[session.projectPath] != nil else { continue }
       let key = "\(session.tool.rawValue):\(session.projectPath)"
@@ -213,9 +159,11 @@ actor SessionScanner {
       }
       sessions[index].pid = match.pid
       sessions[index].tty = match.tty
-      sessions[index].live = true
+      sessions[index].evidence.liveness = .alive
     }
   }
+
+  // MARK: - Processes with no session
 
   /// Live processes no session accounts for — an agent that has started but not
   /// yet written its first record.
@@ -226,12 +174,13 @@ actor SessionScanner {
   /// collapsed, since nothing here can tell whether they are one session or
   /// several — and claiming several would be the worse guess.
   private func unmatchedProcesses(
-    _ processes: [LiveProcess], sessions: [SessionInfo], now: Date
+    _ processes: [LiveProcess], sessions: [SessionInfo], scanSucceeded: Bool
   ) -> [SessionInfo] {
+    guard scanSucceeded else { return [] }
     let covered = Set(sessions.map { "\($0.tool.rawValue):\($0.projectPath)" })
     var emitted = Set<String>()
 
-    return processes.compactMap { process in
+    return processes.compactMap { process -> SessionInfo? in
       guard let cwd = process.cwd, cwd != "/" else { return nil }
       let key = "\(process.tool.rawValue):\(cwd)"
       guard !covered.contains(key), emitted.insert(key).inserted else { return nil }
@@ -244,15 +193,54 @@ actor SessionScanner {
         projectPath: cwd,
         workingDirectory: cwd,
         project: URL(fileURLWithPath: cwd).lastPathComponent,
-        // All we know is that an agent exists here — nothing about what it is
-        // doing. `running` would assert activity we cannot see, and it is the
-        // state that drives both the fast poll cadence and the breathing card,
-        // so over-claiming it is not free: one such process kept the app at
-        // full rate indefinitely while its agent had been quiet for days.
-        state: .idle,
-        live: true,
-        lastActivity: process.started
+        // An agent is here and nothing says what it is doing. `unknown` is the
+        // whole of what is known; the process's start time is the only honest
+        // timestamp, and claiming activity instead once pinned the app at full
+        // poll rate for as long as the process lived.
+        evidence: Evidence(
+          .unknown, at: process.started, source: .inferred, liveness: .alive),
+        state: .idle
       )
     }
+  }
+
+  // MARK: - Sub-agents
+
+  /// Replaces delegated agents with a count on the session they belong to.
+  ///
+  /// A program that farms work out to sub-agents produces one transcript per
+  /// agent, and each of those looks exactly like a session: 26 of them appeared
+  /// under one project here against 9 sessions actually opened by hand. Listing
+  /// them individually buries the sessions a person is actually sitting in
+  /// front of, which is the one thing this display must not do (ADR-0007).
+  ///
+  /// They are attributed by project directory. Nothing in a transcript names
+  /// the session that spawned it, and the directory is the only thing they
+  /// demonstrably share.
+  private func foldDelegated(_ sessions: [SessionInfo]) -> [SessionInfo] {
+    guard !UserDefaults.standard.bool(forKey: "showDelegatedSessions") else { return sessions }
+    let delegated = sessions.filter(\.isDelegated)
+    guard !delegated.isEmpty else { return sessions }
+
+    var workingByProject: [String: Int] = [:]
+    for agent in delegated where agent.evidence.activity == .turnInFlight {
+      workingByProject[agent.projectPath, default: 0] += 1
+    }
+
+    var kept = sessions.filter { !$0.isDelegated }
+    for index in kept.indices {
+      kept[index].subagentCount = workingByProject[kept[index].projectPath] ?? 0
+    }
+
+    // A batch with no session of its own to hang off still deserves to be
+    // visible — otherwise the work would vanish from the display entirely.
+    let adopted = Set(kept.map(\.projectPath))
+    for (project, count) in workingByProject where !adopted.contains(project) {
+      guard var orphan = delegated.first(where: { $0.projectPath == project }) else { continue }
+      orphan.subagentCount = count
+      orphan.isDelegated = false
+      kept.append(orphan)
+    }
+    return kept
   }
 }

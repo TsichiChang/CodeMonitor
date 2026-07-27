@@ -63,46 +63,38 @@ final class ClaudeSource: SessionSource {
       project: label(for: origin),
       gitBranch: entry?.gitBranch,
       model: entry?.model,
-      state: Self.classify(entry, age: age),
+      evidence: Evidence(Self.activity(entry), at: mtime, source: .inferred),
+      state: .idle,
       // `sdk-*` entrypoints are agents a program started. Claude Code gives each
       // one its own transcript, so a single batch job can mint dozens of them —
       // 26 in one project here, against 9 sessions actually opened by hand.
       isDelegated: entry?.entrypoint?.hasPrefix("sdk") == true,
-      live: false,
-      lastActivity: mtime,
       lastMessage: entry?.snippet
     )
   }
 
-  /// Infers state from the trailing conversation entry.
+  /// Reads what last happened from the trailing conversation entry.
   ///
-  /// This is the weaker kind of state — a hook reporting `PermissionRequest`
-  /// says the session is blocked; a timestamp only suggests it.
-  private static func classify(_ entry: ClaudeEntry?, age: TimeInterval) -> SessionState {
-    guard let entry else { return age < Aging.writing ? .running : .idle }
+  /// Only the observation — how long ago it was, and what that means, is the
+  /// derivation's business (ADR-0012).
+  private static func activity(_ entry: ClaudeEntry?) -> Activity {
+    guard let entry else { return .unknown }
 
     switch entry.role {
     case "assistant":
-      // A dispatched tool call with no result yet: either the tool is running,
-      // or the CLI is sitting on a permission prompt.
-      if entry.hasToolUse || entry.stopReason == "tool_use" {
-        if age < Aging.approvalSuspect { return .running }
-        if age < Aging.waitingMax { return .waiting }
-        return .idle
-      }
+      // A dispatched tool with no result yet, or a response still streaming.
+      if entry.hasToolUse || entry.stopReason == "tool_use" { return .turnInFlight }
       if let reason = entry.stopReason,
         ["end_turn", "stop_sequence", "max_tokens"].contains(reason)
       {
-        return .idle  // turn complete, awaiting the user
+        return .turnComplete
       }
-      return age < Aging.approvalSuspect ? .running : .idle  // still streaming
-
+      return .turnInFlight
     case "user":
       // A prompt or a tool result just landed; the model owns the next turn.
-      return age < Aging.generatingMax ? .running : .idle
-
+      return .turnInFlight
     default:
-      return age < Aging.writing ? .running : .idle
+      return .unknown
     }
   }
 

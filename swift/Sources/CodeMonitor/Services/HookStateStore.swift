@@ -13,7 +13,10 @@ import Foundation
 struct HookState: Sendable {
   let tool: ToolKind
   let sessionID: String
-  let state: SessionState
+  /// What the tool said happened, not what it means. The hook reports its event
+  /// name; deciding what that implies is the derivation's job (ADR-0012), which
+  /// is why fixing a mis-reading no longer means editing the user's settings.
+  let activity: Activity
   let pid: Int32?
   let tty: String?
   let cwd: String
@@ -109,7 +112,7 @@ enum HookStateStore {
   private struct Payload: Decodable {
     let tool: String
     let sessionId: String
-    let state: String
+    let event: String?
     let pid: Int32?
     let tty: String?
     let cwd: String?
@@ -119,17 +122,41 @@ enum HookStateStore {
     let updatedAt: Double
   }
 
+  /// Maps a hook's event name onto what it says about the session.
+  ///
+  /// Two entries here were once encoded as arguments in the user's
+  /// `settings.json`, and both were wrong: `Notification` covers several
+  /// unrelated things, and `SessionStart` is not activity — a new session is
+  /// waiting for its first instruction. Correcting either meant editing a file
+  /// this app does not own. They are ordinary lines of Swift now.
+  static func activity(forEvent event: String?) -> Activity {
+    switch event {
+    case "PermissionRequest", "Notification:permission_prompt":
+      return .blockedOnUser
+    case "Stop", "SubagentStop", "Notification:idle_prompt":
+      return .turnComplete
+    case "SessionStart":
+      return .opened
+    case "UserPromptSubmit", "PreToolUse", "PostToolUse", "PreCompact",
+      "Stop:subagent-running":
+      // A Stop fired while a Task sub-agent is still working is not the end of
+      // the turn — the main agent merely yielded.
+      return .turnInFlight
+    default:
+      return .unknown
+    }
+  }
+
   private static func parse(_ url: URL) -> HookState? {
     guard let data = try? Data(contentsOf: url),
       let payload = try? JSONDecoder().decode(Payload.self, from: data),
-      let tool = ToolKind(rawValue: payload.tool),
-      let state = SessionState(rawValue: payload.state)
+      let tool = ToolKind(rawValue: payload.tool)
     else { return nil }
 
     return HookState(
       tool: tool,
       sessionID: payload.sessionId,
-      state: state,
+      activity: Self.activity(forEvent: payload.event),
       pid: payload.pid.flatMap { $0 > 0 ? $0 : nil },
       tty: payload.tty.flatMap { $0.isEmpty ? nil : $0 },
       cwd: payload.cwd ?? "",
@@ -142,12 +169,13 @@ enum HookStateStore {
 }
 
 extension HookState {
+  /// Bridges the file's snake-ish key names onto the model's.
   fileprivate init(
-    tool: ToolKind, sessionID: String, state: SessionState, pid: Int32?, tty: String?,
+    tool: ToolKind, sessionID: String, activity: Activity, pid: Int32?, tty: String?,
     cwd: String, termProgram: String?, tabId: String?, paneId: String?, updated: Date
   ) {
     self.init(
-      tool: tool, sessionID: sessionID, state: state, pid: pid, tty: tty, cwd: cwd,
+      tool: tool, sessionID: sessionID, activity: activity, pid: pid, tty: tty, cwd: cwd,
       termProgram: termProgram, tabID: tabId, paneID: paneId, updated: updated)
   }
 }

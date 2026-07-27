@@ -30,6 +30,7 @@ APP="build/Code Monitor.app/Contents/MacOS/CodeMonitor"
 "$APP" --focus oversea-fop     # actually jump to the matching session
 "$APP" --dismiss spare         # hide an idle session until it acts again
 "$APP" --restore               # un-hide everything
+"$APP" --selftest              # check the evidence-to-state derivation
 ```
 
 ## App icon
@@ -70,15 +71,21 @@ to restore it from.
 
 ## How a session is classified
 
-Transcripts on disk are the source of truth; live processes only confirm a
-session is still open. A trailing `tool_use` with no result is `running` while
-fresh, `waiting` once it has sat unanswered past the approval threshold, and
-`idle` when clearly abandoned. Thresholds live in `Adapters/SessionSource.swift`.
+A session stores only *evidence* — what its source last saw, when, how
+trustworthy that source is, and whether a process is alive. State, lifetime and
+appearance are each derived from it in one place and never from each other
+(ADR-0012). `Models/Evidence.swift` holds both the model and the derivation;
+`--selftest` runs the table.
 
-That is all inference. A session can also *report* its state, which is both more
-accurate and the only way to distinguish "blocked on a permission prompt" from
-"has been quiet for 45 seconds" — `--diagnose` marks each state `reported` or
-`inferred`.
+That structure is not decoration. Seven defects had landed in the previous
+arrangement, where one enum decided the label, the lifetime, the colour and the
+poll rate at once, so a single wrong `running` was four bugs. Every one of them
+is now a line in the check table.
+
+`--diagnose` prints each session's evidence alongside its derived state, and
+marks the source `reported` or `inferred` — the difference between "Claude Code
+fired `PermissionRequest`" and "a tool call has been quiet for 45 seconds".
+Only the first pulses.
 
 ## Reporting state from hooks (optional)
 

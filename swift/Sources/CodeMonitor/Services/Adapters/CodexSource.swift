@@ -61,21 +61,16 @@ final class CodexSource: SessionSource {
       project: origin == "unknown" ? "Codex session" : label(for: origin),
       gitBranch: meta?.gitBranch,
       model: meta?.model,
-      state: Self.classify(entry, age: age),
-      live: false,
-      lastActivity: mtime,
+      evidence: Evidence(Self.activity(entry), at: mtime, source: .inferred),
+      state: .idle,
       lastMessage: entry?.snippet
     )
   }
 
-  private static func classify(_ entry: CodexEntry?, age: TimeInterval) -> SessionState {
-    if entry?.payloadType == "task_complete" {
-      return age < Aging.writing ? .running : .idle
-    }
-    // Any other trailing event means the turn is still in flight.
-    if age < Aging.approvalSuspect { return .running }
-    if age < Aging.waitingMax { return .waiting }
-    return .idle
+  private static func activity(_ entry: CodexEntry?) -> Activity {
+    // `task_complete` is the one event Codex names that settles the question;
+    // anything else trailing means the turn is still in flight.
+    entry?.payloadType == "task_complete" ? .turnComplete : .turnInFlight
   }
 
   // MARK: - Layout

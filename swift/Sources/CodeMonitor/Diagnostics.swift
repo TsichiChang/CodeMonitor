@@ -18,13 +18,14 @@ enum Diagnostics {
       --focus <text>      Jump to the session whose project or cwd contains <text>.
       --dismiss <text>    Hide an idle session until it does something new.
       --restore           Un-hide everything hidden.
+      --selftest          Check the evidence-to-state derivation table.
       --help              Show this message.
 
     With no arguments the app launches normally.
     """
 
   private static let flags: Set<String> = [
-    "--diagnose", "--focus", "--dismiss", "--restore", "--help", "-h",
+    "--diagnose", "--focus", "--dismiss", "--restore", "--selftest", "--help", "-h",
   ]
 
   /// Whether these arguments select a CLI command rather than the GUI.
@@ -66,6 +67,11 @@ enum Diagnostics {
       await dismiss(matching: arguments[2])
     case "--restore":
       await restore()
+    case "--selftest":
+      print("Evidence derivation")
+      let failures = EvidenceChecks.run()
+      print(failures == 0 ? "\nall \(EvidenceChecks.cases.count) evidence cases pass" : "\n\(failures) FAILED")
+      exit(failures == 0 ? 0 : 1)
     default:
       print(usage)
     }
@@ -141,8 +147,9 @@ enum Diagnostics {
     }
 
     for session in snapshot.sessions {
-      let origin = session.stateIsAuthoritative ? "reported" : "inferred"
+      let origin = session.evidence.source.rawValue
       print("• \(session.project)  [\(session.tool.rawValue)]  \(session.state.rawValue) (\(origin))")
+      print("    evidence: \(session.evidence.activity.rawValue), liveness \(session.evidence.liveness.rawValue)")
       if session.subagentCount > 0 { print("    sub-agents: \(session.subagentCount) running") }
       if let tab = session.tabID { print("    tab:   \(tab)") }
       if let pane = session.paneID { print("    pane:  \(pane)") }

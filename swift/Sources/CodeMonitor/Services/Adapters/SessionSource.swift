@@ -55,6 +55,11 @@ enum Aging {
   /// process does not wipe the list.
   static let windowWithoutProcess: TimeInterval = 5 * 60
 
+  /// How long a session stays listed when liveness could not be determined.
+  /// Generous on purpose — this is the failure case, and dropping sessions
+  /// because a scan did not run would be the worse outcome.
+  static let windowWithUnknownLiveness: TimeInterval = 30 * 60
+
   /// How far back a source bothers reading. Not a lifecycle rule — that is the
   /// scanner's — just a bound on how much history is worth parsing.
   ///

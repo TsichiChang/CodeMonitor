@@ -9,16 +9,11 @@ final class OpenCodeSource: SessionSource {
   let tool: ToolKind = .opencode
 
   func sessions(now: Date) -> [SessionInfo] {
-    OpenCodeStore.sessions().compactMap { row in
+    OpenCodeStore.sessions().compactMap { row -> SessionInfo? in
       let origin = row.directory ?? "unknown"
       guard isUsableProject(origin) else { return nil }
 
-      let age = now.timeIntervalSince(row.updated)
-      // OpenCode exposes no signal for a session blocked on approval, so
-      // `waiting` is currently unreachable here and the window is the shorter
-      // of the two.
-      let state: SessionState = age < Aging.writing ? .running : .idle
-      guard age <= Aging.readHorizon else { return nil }
+      guard now.timeIntervalSince(row.updated) <= Aging.readHorizon else { return nil }
 
       return SessionInfo(
         id: "opencode:\(row.id)",
@@ -27,9 +22,10 @@ final class OpenCodeSource: SessionSource {
         workingDirectory: origin,
         project: origin == "unknown" ? "OpenCode session" : label(for: origin),
         model: row.model,
-        state: state,
-        live: false,
-        lastActivity: row.updated,
+        // The store records when a session last changed and not what changed,
+        // so `unknown` is the honest reading rather than a failure.
+        evidence: Evidence(.unknown, at: row.updated, source: .inferred),
+        state: .idle,
         lastMessage: row.title
       )
     }
