@@ -35,12 +35,15 @@ APP="build/Code Monitor.app/Contents/MacOS/CodeMonitor"
 | Path | Role |
 |---|---|
 | `Models/Session.swift` | Session/state types shared by scanner and views |
-| `Services/Shell.swift` | Bounded child-process execution (every call has a timeout) |
+| `Services/Adapters/` | One source per tool, each reading its own store |
 | `Services/TranscriptReader.swift` | JSONL tail/head reading + parsing |
-| `Services/ProcessScanner.swift` | `ps`/`lsof` discovery of live agent processes |
-| `Services/SessionScanner.swift` | Collectors + state classification, caches (an `actor`) |
+| `Services/OpenCodeStore.swift` | Read-only SQLite reader for OpenCode's session index |
+| `Services/HookStateStore.swift` | State files agent hooks leave behind |
+| `Services/ProcessScanner.swift` | Live-process discovery through libproc, no subprocesses |
+| `Services/SessionScanner.swift` | Merges sources, processes and reports into a snapshot |
 | `Services/TerminalFocus.swift` | Jump-to-terminal, per-host |
 | `Services/SessionMonitor.swift` | `@Observable` poll loop driving the UI |
+| `Services/Shell.swift` | Bounded child-process execution (jump path only) |
 | `Views/` | SwiftUI dashboard, cards, menu bar, settings |
 
 ## How a session is classified
@@ -91,10 +94,11 @@ precisely so several can coexist. Do not replace what is there.
 
 The trailing `locate` argument tells the hook to also record which terminal pane
 the session is in — the pane rather than the tab, because a split tab can hold
-several sessions and this is what tells them apart. It is passed only on those two events because they are the
-moments the session's tab is certainly focused — the user has just typed into it
-— and Otty can only be asked which tab is focused, never which tab is calling
-(ADR-0009).
+several sessions and this is what tells them apart.
+
+It is passed only on those two events because they are the moments the session's
+pane is certainly focused — the user has just typed into it — and Otty can only
+be asked what is focused, never what is calling (ADR-0009).
 
 State is written to `~/.local/state/codemonitor/sessions/<session-id>.json`, one
 file per session, which is why it survives the app being closed. Set
@@ -104,20 +108,20 @@ from `settings.json` and delete that directory.
 ## How the terminal jump works
 
 The host terminal is identified from the session's own `TERM_PROGRAM`
-environment variable (read via `ps -E`), **not** by walking the process tree —
+environment variable, **not** by walking the process tree —
 Otty re-parents its shells away from the GUI process, so a ppid walk never
 reaches it.
 
 Once the host is known it is addressed directly, so no unrelated terminal gets
 probed (which would trigger its Automation prompt for nothing):
 
-- **Otty** — `otty-cli tab focus`, matched by working directory.
-  Otty's AppleScript dictionary declares a `tty` property but always returns an
-  empty string, so tty-based tab matching cannot work there. The CLI path also
-  needs no Automation permission.
-  *Known limit:* several tabs in the same directory are indistinguishable over
-  the CLI; a titled tab wins (Otty badges tabs running an agent), else the
-  lowest index.
+- **Otty** — `otty-cli`, needing no Automation permission. With a hook
+  installed the session's own pane was recorded and is focused directly;
+  otherwise the match is by working directory, which cannot separate two tabs in
+  the same directory. Otty's AppleScript dictionary declares a `tty` property
+  but always returns an empty string, so tty-based matching cannot work there
+  either way. A recorded location is used only if it still exists and still sits
+  in the session's directory.
 - **Terminal.app / iTerm2** — AppleScript, selecting the tab whose tty matches.
   Prompts for Automation permission the first time.
 - **Anything else** — the app is brought to the front, without tab selection.
@@ -125,9 +129,9 @@ probed (which would trigger its Automation prompt for nothing):
 ## Requirements
 
 - macOS 14+, Swift 6
-- **Not sandboxed** — the app shells out to `ps`, `lsof`, `osascript`, and
-  `otty-cli`. Adding an App Sandbox entitlement breaks session detection
-  entirely.
+- **Not sandboxed** — process discovery reads other processes through libproc,
+  and jumping shells out to `osascript` / `otty-cli`. An App Sandbox entitlement
+  breaks both.
 - Signed with a stable identity. macOS ties Automation permission to the code
   signature, so an ad-hoc signature (which changes every rebuild) makes the
   permission prompt reappear each time. `build-app.sh` prefers an
