@@ -38,6 +38,21 @@ cwd=$(json_field cwd)
 [ -n "$cwd" ] || cwd="$PWD"
 event=$(json_field hook_event_name)
 
+# `Notification` covers several unrelated things and cannot be mapped to one
+# state from the settings file. Its `notification_type` says which: an
+# `idle_prompt` is Claude asking for the next instruction — the turn is over —
+# while a `permission_prompt` is the blocking kind. Treating them alike is how a
+# finished session ends up pinned as "waiting approval": the notification fires
+# *after* Stop, so it overwrites the idle Stop just reported, and `waiting` never
+# ages out (ADR-0005).
+if [ "$event" = Notification ]; then
+    case "$(json_field notification_type)" in
+        permission_prompt) state=waiting ;;
+        idle_prompt)       state=idle ;;
+        *)                 exit 0 ;;   # nothing about the session's state
+    esac
+fi
+
 # A Task subagent runs in the background: while it works the main agent often
 # yields and Claude fires Stop, even though the turn is not over. The still
 # running subagent is listed in the Stop payload, so treat that as activity
