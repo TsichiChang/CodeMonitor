@@ -58,6 +58,25 @@ The turn is complete and the session is awaiting the user's next prompt. Not an
 error state and not abandonment.
 _Avoid_: Done, finished, dead
 
+**Evidence**:
+What a session's own store or hook actually said — the last event, when it
+happened, how trustworthy the source is, and whether a process is alive. The
+only thing stored about a session's condition; everything shown is derived from
+it (ADR-0012).
+_Avoid_: Status, raw state
+
+**Activity**:
+The event evidence records — `turnInFlight`, `blockedOnUser`, `turnComplete`,
+`opened`, or `unknown`. Deliberately the common denominator of four very
+unequal sources, so `unknown` is a normal value rather than a failure.
+_Avoid_: Event type, action
+
+**Liveness**:
+Whether a process backs a session: alive, absent, or unknown. `unknown` is a
+real observation — a scan that could not run says nothing about a session, and
+treating that as absent once emptied the entire display.
+_Avoid_: Live as a boolean
+
 **Authoritative state**:
 A state the tool itself reported, rather than one we inferred from file
 timestamps. Only some tools can report one, so both kinds coexist and inferred
