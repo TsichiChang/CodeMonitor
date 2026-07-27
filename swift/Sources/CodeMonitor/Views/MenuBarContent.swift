@@ -26,6 +26,15 @@ struct MenuBarContent: View {
 
     Divider()
 
+    // Only offered when something is actually hidden, so dismissing never
+    // becomes a one-way door the user cannot find their way back through.
+    if monitor.dismissedCount > 0 {
+      Button("Show \(monitor.dismissedCount) hidden session\(monitor.dismissedCount == 1 ? "" : "s")") {
+        monitor.restoreAllDismissed()
+      }
+      Divider()
+    }
+
     Button("Open Dashboard") {
       NSApp.activate(ignoringOtherApps: true)
       openWindow(id: WindowID.dashboard)

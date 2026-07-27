@@ -127,6 +127,17 @@ enum TerminalFocus {
         if await runAppleScript(script) == "matched" { return .ok }
       }
     }
+
+    // Not every session lives in a terminal. Agents are launched by editors and
+    // desktop apps too, and those sessions have no tty and no TERM_PROGRAM —
+    // by the rules above they were simply unreachable. The app that launched
+    // the process names itself in the process's own environment, so bringing
+    // that forward works for any of them without knowing what it is.
+    if let bundleID = ProcessScanner.environmentValue("__CFBundleIdentifier", of: pid),
+      await activate(bundleID: bundleID)
+    {
+      return .ok
+    }
     return .unknownTerminal
   }
 
@@ -336,14 +347,15 @@ enum TerminalFocus {
     }
   }
 
+  /// Brings an app to the front, by bundle identifier.
+  ///
+  /// `open` rather than `NSRunningApplication.activate`, which reports success
+  /// whether or not anything happens: a process that is not itself frontmost
+  /// cannot promote another app, so the call returned true from the diagnostics
+  /// CLI while the frontmost app never changed. `open` asks the window server
+  /// and works from anywhere. It costs a subprocess, but only ever on a jump.
   @discardableResult
   private static func activate(bundleID: String) async -> Bool {
-    let activated = await MainActor.run {
-      NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
-        .first?
-        .activate(options: [.activateAllWindows]) ?? false
-    }
-    if activated { return true }
     let output = await Shell.run("/usr/bin/open", ["-b", bundleID], timeout: 10)
     return output?.succeeded ?? false
   }

@@ -74,9 +74,14 @@ struct DashboardView: View {
       }
       LazyVGrid(columns: columns, spacing: 10) {
         ForEach(items) { session in
-          SessionCardView(session: session) {
-            Task { await monitor.focus(session) }
-          }
+          SessionCardView(
+            session: session,
+            onFocus: { Task { await monitor.focus(session) } },
+            // Only idle cards can be closed. Closing something that is running,
+            // or waiting on you, would hide the two things this display exists
+            // to show (ADR-0007).
+            onDismiss: session.state == .idle ? { monitor.dismiss(session) } : nil
+          )
         }
       }
     }

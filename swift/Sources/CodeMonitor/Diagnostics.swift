@@ -16,12 +16,16 @@ enum Diagnostics {
 
       --diagnose          List detected sessions and their resolved terminal host.
       --focus <text>      Jump to the session whose project or cwd contains <text>.
+      --dismiss <text>    Hide an idle session until it does something new.
+      --restore           Un-hide everything hidden.
       --help              Show this message.
 
     With no arguments the app launches normally.
     """
 
-  private static let flags: Set<String> = ["--diagnose", "--focus", "--help", "-h"]
+  private static let flags: Set<String> = [
+    "--diagnose", "--focus", "--dismiss", "--restore", "--help", "-h",
+  ]
 
   /// Whether these arguments select a CLI command rather than the GUI.
   static func handles(_ arguments: [String]) -> Bool {
@@ -54,15 +58,75 @@ enum Diagnostics {
         exit(2)
       }
       await focus(matching: arguments[2])
+    case "--dismiss":
+      guard arguments.count > 2 else {
+        print("error: --dismiss needs a search string\n\n\(usage)")
+        exit(2)
+      }
+      await dismiss(matching: arguments[2])
+    case "--restore":
+      await restore()
     default:
       print(usage)
     }
   }
 
+  @MainActor
+  private static func dismiss(matching needle: String) async {
+    let monitor = SessionMonitor()
+    defer { monitor.stop() }
+    await monitor.refresh()
+
+    guard let session = match(needle, in: monitor.snapshot) else { exit(1) }
+    guard session.state == .idle else {
+      print("\"\(session.project)\" is \(session.state.rawValue), not idle — only idle sessions can be hidden.")
+      exit(1)
+    }
+    monitor.dismiss(session)
+    print("Hidden \"\(session.project)\" (\(session.id)) until it does something new.")
+  }
+
+  @MainActor
+  private static func restore() async {
+    let monitor = SessionMonitor()
+    defer { monitor.stop() }
+    let count = monitor.dismissedCount
+    monitor.restoreAllDismissed()
+    print(count == 0 ? "Nothing was hidden." : "Restored \(count) hidden session(s).")
+  }
+
+  private static func match(_ needle: String, in snapshot: SessionSnapshot) -> SessionInfo? {
+    let lowered = needle.lowercased()
+    let matches = snapshot.sessions.filter {
+      $0.id == needle
+        || $0.project.lowercased().contains(lowered)
+        || $0.projectPath.lowercased().contains(lowered)
+    }
+    guard let session = matches.first else {
+      print("No session matching \"\(needle)\".")
+      print("Known: \(snapshot.sessions.map(\.project).joined(separator: ", "))")
+      return nil
+    }
+    if matches.count > 1 {
+      print("note: \(matches.count) matched; using \"\(session.project)\" (\(session.id))")
+    }
+    return session
+  }
+
   // MARK: - Commands
 
+  @MainActor
   private static func diagnose() async {
-    let snapshot = await SessionScanner().scan()
+    // Through the monitor, not the scanner: the monitor is what the dashboard
+    // shows, and it hides sessions the user has closed. Reporting the raw scan
+    // would answer a question nobody asked.
+    let monitor = SessionMonitor()
+    defer { monitor.stop() }
+    await monitor.refresh()
+    let snapshot = monitor.snapshot
+    if monitor.dismissedCount > 0 {
+      print("(\(monitor.dismissedCount) session(s) hidden by the user)")
+    }
 
     print("Scanned at \(snapshot.generatedAt.formatted(date: .omitted, time: .standard))")
     print("Process scan: \(snapshot.processScanOk ? "ok" : "FAILED — sessions will look stale")")
@@ -197,7 +261,11 @@ enum Diagnostics {
     }
 
     guard let matched else {
-      return "unidentified (TERM_PROGRAM=\(termProgram ?? "unset")) — would fall back to tty probing"
+      // Not a terminal at all: an editor or desktop app launched this agent.
+      if let bundleID = ProcessScanner.environmentValue("__CFBundleIdentifier", of: pid) {
+        return "\(bundleID) (not a terminal) → activate that app"
+      }
+      return "unidentified (no TERM_PROGRAM, no launching app) — would probe terminals by tty"
     }
     let strategy =
       switch matched.kind {

@@ -84,6 +84,28 @@ enum HookStateStore {
     }
   }
 
+  // MARK: - Dismissals
+
+  private static let dismissalsKey = "dismissedSessions"
+
+  /// Session ids the user has closed, mapped to how recent that session was at
+  /// the time — the mark a later activity has to pass to bring it back.
+  static func loadDismissals() -> [String: Date] {
+    let stored = UserDefaults.standard.dictionary(forKey: dismissalsKey) ?? [:]
+    return stored.compactMapValues { value in
+      (value as? Double).map { Date(timeIntervalSince1970: $0) }
+    }
+  }
+
+  static func saveDismissals(_ dismissals: [String: Date]) {
+    let encoded = dismissals.mapValues { $0.timeIntervalSince1970 }
+    UserDefaults.standard.set(encoded, forKey: dismissalsKey)
+    // Defaults are written back lazily, which is fine for the app and not for
+    // the CLI: `--dismiss` exits immediately afterwards and the write was being
+    // discarded with the process.
+    UserDefaults.standard.synchronize()
+  }
+
   private struct Payload: Decodable {
     let tool: String
     let sessionId: String

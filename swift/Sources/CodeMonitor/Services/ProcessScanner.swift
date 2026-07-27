@@ -16,6 +16,13 @@ struct LiveProcess: Sendable {
   let pid: Int32
   let tty: String?
   var cwd: String?
+  /// When the process was launched.
+  ///
+  /// The only honest timestamp available for a session known solely by its
+  /// process. Using "now" instead made such a card permanently fresh: it could
+  /// never age out, and dismissing it undid itself on the next scan, because
+  /// the card looked like it had just acted.
+  var started: Date
 }
 
 enum ProcessScanner {
@@ -72,7 +79,8 @@ enum ProcessScanner {
           tool: tool,
           pid: pid,
           tty: tty(of: pid),
-          cwd: cwd(of: pid)
+          cwd: cwd(of: pid),
+          started: startTime(of: pid) ?? Date()
         )
       )
     }
@@ -107,6 +115,17 @@ enum ProcessScanner {
       $0.withMemoryRebound(to: CChar.self, capacity: Int(MAXPATHLEN)) { String(cString: $0) }
     }
     return path.isEmpty || path == "/" ? nil : path
+  }
+
+  /// When a process was launched.
+  static func startTime(of pid: pid_t) -> Date? {
+    var info = proc_bsdinfo()
+    let size = MemoryLayout<proc_bsdinfo>.size
+    let read = withUnsafeMutablePointer(to: &info) {
+      proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, $0, Int32(size))
+    }
+    guard read == Int32(size), info.pbi_start_tvsec > 0 else { return nil }
+    return Date(timeIntervalSince1970: Double(info.pbi_start_tvsec))
   }
 
   /// Controlling terminal of a process, e.g. "ttys004".

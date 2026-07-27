@@ -26,8 +26,10 @@ session isn't detected or a jump lands in the wrong tab:
 
 ```bash
 APP="build/Code Monitor.app/Contents/MacOS/CodeMonitor"
-"$APP" --diagnose              # sessions + the terminal host resolved for each
+"$APP" --diagnose              # sessions + the host resolved for each
 "$APP" --focus oversea-fop     # actually jump to the matching session
+"$APP" --dismiss spare         # hide an idle session until it acts again
+"$APP" --restore               # un-hide everything
 ```
 
 ## App icon
@@ -145,6 +147,12 @@ probed (which would trigger its Automation prompt for nothing):
 - **Terminal.app / iTerm2** — AppleScript, selecting the tab whose tty matches.
   Prompts for Automation permission the first time.
 - **Anything else** — the app is brought to the front, without tab selection.
+
+Not every session lives in a terminal: editors and desktop apps launch agents
+too, and those have no tty and no `TERM_PROGRAM`. The app that launched the
+process names itself in the process's environment (`__CFBundleIdentifier`), so
+those sessions activate their own host — Obsidian, Claude Desktop, whatever it
+is — rather than being unreachable.
 
 ## Requirements
 

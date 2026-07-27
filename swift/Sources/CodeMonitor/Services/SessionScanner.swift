@@ -192,7 +192,7 @@ actor SessionScanner {
         // full rate indefinitely while its agent had been quiet for days.
         state: .idle,
         live: true,
-        lastActivity: now
+        lastActivity: process.started
       )
     }
   }
