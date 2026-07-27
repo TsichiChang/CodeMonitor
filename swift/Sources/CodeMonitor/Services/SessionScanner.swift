@@ -140,7 +140,12 @@ actor SessionScanner {
         projectPath: cwd,
         workingDirectory: cwd,
         project: URL(fileURLWithPath: cwd).lastPathComponent,
-        state: .running,
+        // All we know is that an agent exists here — nothing about what it is
+        // doing. `running` would assert activity we cannot see, and it is the
+        // state that drives both the fast poll cadence and the breathing card,
+        // so over-claiming it is not free: one such process kept the app at
+        // full rate indefinitely while its agent had been quiet for days.
+        state: .idle,
         live: true,
         lastActivity: now
       )

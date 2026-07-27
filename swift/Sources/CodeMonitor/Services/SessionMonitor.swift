@@ -37,13 +37,31 @@ final class SessionMonitor {
     start()
   }
 
+  /// How long to wait when nothing is running.
+  private static let quietInterval: TimeInterval = 15
+
+  /// The gap before the next scan, chosen from what the last one found.
+  ///
+  /// Only a `running` session changes on its own, so only a running session
+  /// earns the fast cadence. `idle` and `waiting` are both static until the
+  /// user does something, and polling them at full rate reflects nothing.
+  ///
+  /// This also keeps the one clock-driven transition sharp: a session becomes
+  /// `waiting` by *not* being touched for long enough, and it is `running`
+  /// right up until that moment — so the fast cadence is still in force when
+  /// the threshold passes. Watching the filesystem could not do this; the
+  /// signal is the absence of an event.
+  private var nextDelay: TimeInterval {
+    snapshot.counts.running > 0 ? interval : max(interval, Self.quietInterval)
+  }
+
   func start() {
     pollTask?.cancel()
     pollTask = Task { [weak self] in
       while !Task.isCancelled {
         guard let self else { return }
         await self.refresh()
-        try? await Task.sleep(for: .seconds(self.interval))
+        try? await Task.sleep(for: .seconds(self.nextDelay))
       }
     }
   }
