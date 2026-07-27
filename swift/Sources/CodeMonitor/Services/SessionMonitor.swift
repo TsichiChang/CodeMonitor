@@ -34,6 +34,7 @@ final class SessionMonitor {
   init() {
     let stored = UserDefaults.standard.double(forKey: "refreshInterval")
     if stored >= 0.5, stored <= 60 { interval = stored }
+    HookStateStore.pruneAbandoned()
     start()
   }
 
@@ -103,7 +104,8 @@ final class SessionMonitor {
     // The terminal is matched on the Project instead: a tab's directory is
     // where its shell started the agent, and the shell does not follow the
     // agent around (ADR-0009).
-    let result = await TerminalFocus.focus(pid: pid, ttyHint: tty, cwd: session.projectPath)
+    let result = await TerminalFocus.focus(
+      pid: pid, ttyHint: tty, cwd: session.projectPath, tabID: session.tabID)
     if !result.isOK { focusError = result.message }
     return result
   }

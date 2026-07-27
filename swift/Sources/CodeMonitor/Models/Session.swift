@@ -86,6 +86,11 @@ struct SessionInfo: Identifiable, Sendable, Hashable {
   var gitBranch: String?
   var model: String?
   var state: SessionState
+  /// Whether `state` was reported by the tool itself rather than inferred from
+  /// timestamps. An inferred state is the weaker claim.
+  var stateIsAuthoritative = false
+  /// Terminal tab hosting this session, when a hook was able to record one.
+  var tabID: String?
   /// Whether a live agent process backs this session.
   var live: Bool
   /// Last observed activity (transcript mtime).

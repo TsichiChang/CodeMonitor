@@ -77,7 +77,9 @@ enum Diagnostics {
     }
 
     for session in snapshot.sessions {
-      print("• \(session.project)  [\(session.tool.rawValue)]  \(session.state.rawValue)")
+      let origin = session.stateIsAuthoritative ? "reported" : "inferred"
+      print("• \(session.project)  [\(session.tool.rawValue)]  \(session.state.rawValue) (\(origin))")
+      if let tab = session.tabID { print("    tab:   \(tab)") }
       print("    id:    \(session.id)")
       print("    project: \(session.projectPath)")
       if session.workingDirectory != session.projectPath {

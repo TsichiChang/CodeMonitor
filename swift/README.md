@@ -48,8 +48,57 @@ APP="build/Code Monitor.app/Contents/MacOS/CodeMonitor"
 Transcripts on disk are the source of truth; live processes only confirm a
 session is still open. A trailing `tool_use` with no result is `running` while
 fresh, `waiting` once it has sat unanswered past the approval threshold, and
-`idle` when clearly abandoned. Thresholds live at the top of
-`SessionScanner.swift`.
+`idle` when clearly abandoned. Thresholds live in `Adapters/SessionSource.swift`.
+
+That is all inference. A session can also *report* its state, which is both more
+accurate and the only way to distinguish "blocked on a permission prompt" from
+"has been quiet for 45 seconds" — `--diagnose` marks each state `reported` or
+`inferred`.
+
+## Reporting state from hooks (optional)
+
+Installing the hook is opt-in and changes a file this app does not otherwise
+touch, so it is a manual step. Nothing breaks without it; state stays inferred.
+
+Copy the script somewhere stable and make it executable:
+
+```bash
+mkdir -p ~/.claude/hooks
+cp swift/hooks/codemonitor-hook.sh ~/.claude/hooks/
+chmod +x ~/.claude/hooks/codemonitor-hook.sh
+```
+
+Then **append** an entry to each event's array in `~/.claude/settings.json` —
+that file already holds other integrations' hooks, and every event is a list
+precisely so several can coexist. Do not replace what is there.
+
+```jsonc
+// under "hooks", add one of these objects to each named event's array:
+{ "hooks": [{ "type": "command",
+  "command": "~/.claude/hooks/codemonitor-hook.sh <state> \"$PPID\"" }] }
+```
+
+| Event | `<state>` | Notes |
+|---|---|---|
+| `SessionStart` | `running` | append ` locate` — see below |
+| `UserPromptSubmit` | `running` | append ` locate` |
+| `PreToolUse` | `running` | |
+| `PostToolUse` | `running` | |
+| `PermissionRequest` | `waiting` | the signal none of the inference can match |
+| `Notification` | `waiting` | |
+| `Stop` | `idle` | |
+| `SessionEnd` | `ended` | removes the session's state file |
+
+The trailing `locate` argument tells the hook to also record which terminal tab
+the session is in. It is passed only on those two events because they are the
+moments the session's tab is certainly focused — the user has just typed into it
+— and Otty can only be asked which tab is focused, never which tab is calling
+(ADR-0009).
+
+State is written to `~/.local/state/codemonitor/sessions/<session-id>.json`, one
+file per session, which is why it survives the app being closed. Set
+`CODEMONITOR_STATE_DIR` to relocate it. To undo everything, remove the entries
+from `settings.json` and delete that directory.
 
 ## How the terminal jump works
 

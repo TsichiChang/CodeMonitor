@@ -19,6 +19,7 @@ actor SessionScanner {
     let (processes, scanOK) = ProcessScanner.scan()
 
     var sessions = sources.flatMap { $0.sessions(now: now) }
+    applyReportedState(to: &sessions)
     attachLiveProcesses(processes, to: &sessions)
     sessions = sessions.filter { stillCurrent($0, now: now) }
     sessions += unmatchedProcesses(processes, sessions: sessions, now: now)
@@ -38,6 +39,57 @@ actor SessionScanner {
       generatedAt: now,
       processScanOk: scanOK
     )
+  }
+
+  /// Replaces inferred state with what a tool reported about itself, where a
+  /// hook has said anything (ADR-0010).
+  ///
+  /// The difference is not cosmetic. Inferred `waiting` means "a tool call has
+  /// sat unanswered for 45 seconds, which usually means a permission prompt";
+  /// reported `waiting` means Claude Code fired `PermissionRequest`. Only the
+  /// second is worth interrupting someone over.
+  ///
+  /// A hook also knows things no amount of scanning can recover — which
+  /// terminal tab the session lives in, and its pid without a directory guess.
+  private func applyReportedState(to sessions: inout [SessionInfo]) {
+    let reported = HookStateStore.states()
+    guard !reported.isEmpty else { return }
+
+    var unclaimed = reported
+    for index in sessions.indices {
+      guard let hook = unclaimed.removeValue(forKey: sessions[index].id) else { continue }
+      sessions[index].state = hook.state
+      sessions[index].stateIsAuthoritative = true
+      sessions[index].tabID = hook.tabID
+      if let pid = hook.pid { sessions[index].pid = pid }
+      if let tty = hook.tty { sessions[index].tty = tty }
+      // A hook fires on events a transcript write does not always follow, so
+      // its timestamp can be the fresher of the two.
+      sessions[index].lastActivity = max(sessions[index].lastActivity, hook.updated)
+    }
+
+    // A report with no matching session is still a session. Its store may be
+    // older than a source is willing to read — an agent left open for days,
+    // quiet until it hits a permission prompt — and that is exactly the case
+    // where the report carries more than the transcript would.
+    for hook in unclaimed.values where !hook.cwd.isEmpty {
+      sessions.append(
+        SessionInfo(
+          id: hook.sessionKey,
+          tool: hook.tool,
+          pid: hook.pid,
+          tty: hook.tty,
+          projectPath: hook.cwd,
+          workingDirectory: hook.cwd,
+          project: URL(fileURLWithPath: hook.cwd).lastPathComponent,
+          state: hook.state,
+          stateIsAuthoritative: true,
+          tabID: hook.tabID,
+          live: hook.pid != nil,
+          lastActivity: hook.updated
+        )
+      )
+    }
   }
 
   /// Whether a session still belongs on screen (ADR-0005).

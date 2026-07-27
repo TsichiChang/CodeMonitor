@@ -1,4 +1,17 @@
+---
+status: superseded by ADR-0011 for transcripts; still applies to hook state files
+---
+
 # Watch the files, don't poll them
+
+> **Partly superseded.** Watching transcripts does not deliver the transition
+> that matters: a session becomes `waiting` by a tool call going *unanswered*,
+> so the signal is the absence of an event and a timer is required regardless.
+> ADR-0011 replaced transcript watching with a cadence that follows state.
+>
+> The argument survives for the state files in ADR-0010. Once a hook reports
+> `waiting`, that *is* an event, and the directory it lands in is small and
+> high-signal — the opposite of the transcript tree this ADR proposed watching.
 
 A two-second poll cost about 6.5% of a core continuously — roughly 90 minutes of
 CPU time a day for a status display. Measured per cycle: ~30ms for `ps` to walk

@@ -76,7 +76,14 @@ enum TerminalFocus {
 
   // MARK: - Entry point
 
-  static func focus(pid: Int32?, ttyHint: String?, cwd: String) async -> FocusResult {
+  static func focus(
+    pid: Int32?, ttyHint: String?, cwd: String, tabID: String? = nil
+  ) async -> FocusResult {
+    // A hook-recorded tab is the only exact answer available for Otty, so it is
+    // tried before anything else — including before a pid, which this path does
+    // not need.
+    if let tabID, await focusOttyTab(cwd: cwd, preferring: tabID) { return .ok }
+
     guard let pid else { return .noProcess }
 
     var tty = ttyHint
@@ -181,7 +188,7 @@ enum TerminalFocus {
   /// its AppleScript `tty` property — the one thing that would disambiguate —
   /// always returns an empty string. A single cwd match is exact, which covers
   /// the normal case of one agent per project.
-  private static func focusOttyTab(cwd: String) async -> Bool {
+  private static func focusOttyTab(cwd: String, preferring tabID: String? = nil) async -> Bool {
     guard await isRunning(bundleID: ottyBundleID), let cli = await ottyCLIPath() else {
       return false
     }
@@ -190,9 +197,24 @@ enum TerminalFocus {
       listed.succeeded,
       let data = listed.stdout.data(using: .utf8),
       let response = try? JSONDecoder().decode(OttyResponse.self, from: data),
-      let tabs = response.data,
-      let target = pickOttyTab(from: tabs, cwd: cwd)
+      let tabs = response.data
     else { return false }
+
+    // A recorded tab is used only if it still exists *and* still sits in this
+    // session's directory. The recording is a snapshot of whatever was focused
+    // when the user last typed, so the check is what separates "the tab this
+    // session lives in" from "a tab the user happened to be looking at"
+    // (ADR-0009). Tabs are also reused: an id can outlive the session that
+    // registered it.
+    let target: OttyTab? =
+      if let tabID, let recorded = tabs.first(where: { $0.id == tabID }), recorded.cwd == cwd {
+        recorded
+      } else if tabID != nil {
+        nil  // recorded tab is gone or has moved on — do not guess in its place
+      } else {
+        pickOttyTab(from: tabs, cwd: cwd)
+      }
+    guard let target else { return false }
 
     guard
       let focused = await Shell.run(cli, ["tab", "focus", "--tab", target.id], timeout: 5),
