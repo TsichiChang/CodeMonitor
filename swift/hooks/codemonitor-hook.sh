@@ -70,14 +70,48 @@ tab_id=""
 if [ "${3:-}" = "locate" ] && [ "${TERM_PROGRAM:-}" = otty ]; then
     otty_cli="${OTTY_CLI:-/Applications/Otty.app/Contents/MacOS/otty-cli}"
     if [ -x "$otty_cli" ]; then
-        tab_id=$(
+        # Otty serialises object keys alphabetically, so "active" precedes "id"
+        # and no single pattern can span them in order. Split the array into one
+        # object per line first, then filter and extract.
+        split_objects='s/},{/}\
+{/g'
+        window=$(
+            "$otty_cli" window list --json 2>/dev/null \
+                | tr -d ' \n' | sed "$split_objects" \
+                | grep '"focused":true' \
+                | sed -n 's/.*"id":"\([^"]*\)".*/\1/p' | head -n 1
+        )
+        active_tabs=$(
             "$otty_cli" tab list --json 2>/dev/null \
-                | tr -d ' \n' \
-                | sed -n 's/.*{\("id":"[^"]*"[^}]*"active":true[^}]*\)}.*/\1/p' \
-                | sed -n 's/.*"id":"\([^"]*\)".*/\1/p' \
-                | head -n 1
+                | tr -d ' \n' | sed "$split_objects" \
+                | grep '"active":true'
+        )
+        # Narrow to the focused window when there is one. There may not be:
+        # Otty reports no focused window whenever it is not the frontmost app,
+        # and rather than give up we take the active tab anyway. One window is
+        # the common case, and a wrong guess is rejected later by the directory
+        # check that guards this value (ADR-0009).
+        if [ -n "$window" ]; then
+            narrowed=$(printf '%s\n' "$active_tabs" | grep -F "\"window_id\":\"$window\"")
+            [ -n "$narrowed" ] && active_tabs="$narrowed"
+        fi
+        tab_id=$(
+            printf '%s\n' "$active_tabs" \
+                | sed -n 's/.*"id":"\([^"]*\)".*/\1/p' | head -n 1
         )
     fi
+fi
+
+existing="$STATE_DIR/$session_id.json"
+
+# Carry the tab forward. Only two events look it up, but every event rewrites
+# this file — without this, the tab found at the start of a turn is erased by
+# the first tool call that follows it.
+if [ -z "$tab_id" ] && [ -f "$existing" ]; then
+    tab_id=$(
+        sed -n 's/.*"tabId"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$existing" \
+            | head -n 1
+    )
 fi
 
 mkdir -p "$STATE_DIR" 2>/dev/null || exit 0
