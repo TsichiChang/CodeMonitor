@@ -117,6 +117,16 @@ enum ProcessScanner {
     return path.isEmpty || path == "/" ? nil : path
   }
 
+  /// Whether a pid names a process that still exists.
+  static func isRunning(_ pid: pid_t) -> Bool {
+    var info = proc_bsdinfo()
+    let size = MemoryLayout<proc_bsdinfo>.size
+    let read = withUnsafeMutablePointer(to: &info) {
+      proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, $0, Int32(size))
+    }
+    return read == Int32(size)
+  }
+
   /// When a process was launched.
   static func startTime(of pid: pid_t) -> Date? {
     var info = proc_bsdinfo()

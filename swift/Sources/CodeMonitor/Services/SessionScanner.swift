@@ -64,7 +64,10 @@ actor SessionScanner {
       sessions[index].stateIsAuthoritative = true
       sessions[index].tabID = hook.tabID
       sessions[index].paneID = hook.paneID
-      if let pid = hook.pid { sessions[index].pid = pid }
+      if let pid = hook.pid, ProcessScanner.isRunning(pid) {
+        sessions[index].pid = pid
+        sessions[index].live = true
+      }
       if let tty = hook.tty { sessions[index].tty = tty }
       // A hook fires on events a transcript write does not always follow, so
       // its timestamp can be the fresher of the two.
@@ -89,7 +92,11 @@ actor SessionScanner {
           stateIsAuthoritative: true,
           tabID: hook.tabID,
           paneID: hook.paneID,
-          live: hook.pid != nil,
+          // Checked, not assumed. A hook removes its file on `SessionEnd`, but
+          // a killed agent never gets to run that — so a report can name a pid
+          // that died long ago, and trusting it would keep the session on
+          // screen for good.
+          live: hook.pid.map(ProcessScanner.isRunning) ?? false,
           lastActivity: hook.updated
         )
       )
@@ -142,7 +149,19 @@ actor SessionScanner {
   /// with nothing at all.
   private func stillCurrent(_ session: SessionInfo, now: Date) -> Bool {
     if session.live { return true }
-    return now.timeIntervalSince(session.lastActivity) <= Aging.window(for: session.state)
+
+    // No process. A session cannot be blocked on your approval when the agent
+    // that would act on your answer is gone, so `waiting` loses the exemption
+    // that otherwise keeps it on screen forever (ADR-0005) — that exemption is
+    // for sessions genuinely sitting there, and this one is not.
+    //
+    // We cannot prove a process belongs to a given session (ADR-0002), but the
+    // absence of any matching process is good evidence of death, and it is the
+    // only evidence available. The cost is that a session whose process exists
+    // yet went unmatched — two sessions in one directory, only one of which can
+    // be given the pid — ages out early. A hook reports its own pid and is not
+    // subject to that.
+    return now.timeIntervalSince(session.lastActivity) <= Aging.windowWithoutProcess
   }
 
   /// Attaches a live process to each session it plausibly belongs to.

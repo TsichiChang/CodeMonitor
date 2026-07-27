@@ -48,6 +48,13 @@ enum Aging {
     }
   }
 
+  /// How long a session with no live process stays listed, whatever its state.
+  ///
+  /// Short, because "no process" is the closest thing to proof that a session
+  /// is over. Long enough that a scan which momentarily fails to match a
+  /// process does not wipe the list.
+  static let windowWithoutProcess: TimeInterval = 5 * 60
+
   /// How far back a source bothers reading. Not a lifecycle rule — that is the
   /// scanner's — just a bound on how much history is worth parsing.
   ///
