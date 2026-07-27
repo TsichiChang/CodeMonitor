@@ -21,6 +21,8 @@ struct HookState: Sendable {
   /// Terminal tab this session was last observed in, when the hook could
   /// determine one (ADR-0009).
   let tabID: String?
+  /// Pane within that tab — what separates sessions sharing a tab.
+  let paneID: String?
   let updated: Date
 
   /// Key shared with `SessionInfo.id`, so the two join without a mapping.
@@ -91,6 +93,7 @@ enum HookStateStore {
     let cwd: String?
     let termProgram: String?
     let tabId: String?
+    let paneId: String?
     let updatedAt: Double
   }
 
@@ -110,6 +113,7 @@ enum HookStateStore {
       cwd: payload.cwd ?? "",
       termProgram: payload.termProgram.flatMap { $0.isEmpty ? nil : $0 },
       tabId: payload.tabId.flatMap { $0.isEmpty ? nil : $0 },
+      paneId: payload.paneId.flatMap { $0.isEmpty ? nil : $0 },
       updated: Date(timeIntervalSince1970: payload.updatedAt)
     )
   }
@@ -118,10 +122,10 @@ enum HookStateStore {
 extension HookState {
   fileprivate init(
     tool: ToolKind, sessionID: String, state: SessionState, pid: Int32?, tty: String?,
-    cwd: String, termProgram: String?, tabId: String?, updated: Date
+    cwd: String, termProgram: String?, tabId: String?, paneId: String?, updated: Date
   ) {
     self.init(
       tool: tool, sessionID: sessionID, state: state, pid: pid, tty: tty, cwd: cwd,
-      termProgram: termProgram, tabID: tabId, updated: updated)
+      termProgram: termProgram, tabID: tabId, paneID: paneId, updated: updated)
   }
 }

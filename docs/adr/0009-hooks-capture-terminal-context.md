@@ -30,8 +30,14 @@ Otty's AppleScript `processes` property does distinguish a tab running an agent
 from an idle one, but it needs Automation permission (denied with -1743 in
 testing) and still cannot separate two tabs both running the same agent.
 
-A captured tab is only accepted when its working directory matches the session's
-origin directory. Otty learns a tab's directory from the OSC 7 sequence the
+What is captured is the *pane*, not the tab. A tab can be split, and this
+machine runs three sessions inside one of them — so focusing the tab lands on
+whichever of the three was last in front, which is the same ambiguity the whole
+mechanism exists to remove. The tab is recorded alongside it as a fallback for
+when the pane is gone.
+
+A captured location is only accepted when its working directory matches the
+session's origin directory. Otty learns a tab's directory from the OSC 7 sequence the
 *shell* emits, and the shell is the agent's parent — so a tab's directory is
 where the agent was started, regardless of any directory the agent moves to
 afterwards. That makes it directly comparable to the session's Project

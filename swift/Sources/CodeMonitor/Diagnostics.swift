@@ -80,6 +80,7 @@ enum Diagnostics {
       let origin = session.stateIsAuthoritative ? "reported" : "inferred"
       print("• \(session.project)  [\(session.tool.rawValue)]  \(session.state.rawValue) (\(origin))")
       if let tab = session.tabID { print("    tab:   \(tab)") }
+      if let pane = session.paneID { print("    pane:  \(pane)") }
       print("    id:    \(session.id)")
       print("    project: \(session.projectPath)")
       if session.workingDirectory != session.projectPath {
@@ -147,6 +148,7 @@ enum Diagnostics {
     let matches = snapshot.sessions.filter {
       $0.project.lowercased().contains(needleLowered)
         || $0.projectPath.lowercased().contains(needleLowered)
+        || $0.id.lowercased().contains(needleLowered)
     }
 
     guard let session = matches.first else {
@@ -159,8 +161,10 @@ enum Diagnostics {
     }
 
     print("Focusing \"\(session.project)\" (\(session.projectPath))")
+    print("  id:    \(session.id)")
+    print("  route: \(route(for: session))")
     if let pid = session.pid {
-      print("  host: \(await hostDescription(pid: pid))")
+      print("  host:  \(await hostDescription(pid: pid))")
     }
 
     let result = await monitor.focus(session)
@@ -176,6 +180,14 @@ enum Diagnostics {
 
   // MARK: - Helpers
 
+  /// Which strategy the jump will actually try first, as opposed to what the
+  /// host is capable of.
+  private static func route(for session: SessionInfo) -> String {
+    if let pane = session.paneID { return "recorded pane \(pane) (falls back if it no longer matches)" }
+    if let tab = session.tabID { return "recorded tab \(tab) (falls back if it no longer matches)" }
+    return "directory matching — no location recorded"
+  }
+
   /// Describes how the focus logic identifies this session's terminal.
   private static func hostDescription(pid: Int32) async -> String {
     let termProgram = ProcessScanner.environmentValue("TERM_PROGRAM", of: pid)
@@ -189,7 +201,7 @@ enum Diagnostics {
     }
     let strategy =
       switch matched.kind {
-      case .otty: "otty-cli tab focus, matched by cwd"
+      case .otty: "otty-cli (see route above)"
       case .terminal, .iterm: "AppleScript, matched by tty"
       case .generic: "activate only (no tab selection)"
       }

@@ -89,8 +89,9 @@ precisely so several can coexist. Do not replace what is there.
 | `Stop` | `idle` | |
 | `SessionEnd` | `ended` | removes the session's state file |
 
-The trailing `locate` argument tells the hook to also record which terminal tab
-the session is in. It is passed only on those two events because they are the
+The trailing `locate` argument tells the hook to also record which terminal pane
+the session is in — the pane rather than the tab, because a split tab can hold
+several sessions and this is what tells them apart. It is passed only on those two events because they are the
 moments the session's tab is certainly focused — the user has just typed into it
 — and Otty can only be asked which tab is focused, never which tab is calling
 (ADR-0009).

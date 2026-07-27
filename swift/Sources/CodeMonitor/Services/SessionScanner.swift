@@ -61,6 +61,7 @@ actor SessionScanner {
       sessions[index].state = hook.state
       sessions[index].stateIsAuthoritative = true
       sessions[index].tabID = hook.tabID
+      sessions[index].paneID = hook.paneID
       if let pid = hook.pid { sessions[index].pid = pid }
       if let tty = hook.tty { sessions[index].tty = tty }
       // A hook fires on events a transcript write does not always follow, so
@@ -85,6 +86,7 @@ actor SessionScanner {
           state: hook.state,
           stateIsAuthoritative: true,
           tabID: hook.tabID,
+          paneID: hook.paneID,
           live: hook.pid != nil,
           lastActivity: hook.updated
         )

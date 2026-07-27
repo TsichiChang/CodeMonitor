@@ -91,6 +91,9 @@ struct SessionInfo: Identifiable, Sendable, Hashable {
   var stateIsAuthoritative = false
   /// Terminal tab hosting this session, when a hook was able to record one.
   var tabID: String?
+  /// Pane within that tab. A tab can hold several sessions side by side, so
+  /// this is what actually distinguishes them.
+  var paneID: String?
   /// Whether a live agent process backs this session.
   var live: Bool
   /// Last observed activity (transcript mtime).

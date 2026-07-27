@@ -67,6 +67,7 @@ esac
 # the user has just typed into it (ADR-0009). Otty resolves nothing about its
 # caller, so the focused tab is the only thing that can be asked for.
 tab_id=""
+pane_id=""
 if [ "${3:-}" = "locate" ] && [ "${TERM_PROGRAM:-}" = otty ]; then
     otty_cli="${OTTY_CLI:-/Applications/Otty.app/Contents/MacOS/otty-cli}"
     if [ -x "$otty_cli" ]; then
@@ -99,6 +100,20 @@ if [ "${3:-}" = "locate" ] && [ "${TERM_PROGRAM:-}" = otty ]; then
             printf '%s\n' "$active_tabs" \
                 | sed -n 's/.*"id":"\([^"]*\)".*/\1/p' | head -n 1
         )
+
+        # A tab can hold several panes, and this machine runs three sessions in
+        # one of them — so the tab alone does not say which session the user
+        # meant. `active` on a pane is per-tab, hence narrowing by the tab we
+        # just resolved rather than taking any active pane.
+        if [ -n "$tab_id" ]; then
+            pane_id=$(
+                "$otty_cli" pane list --json 2>/dev/null \
+                    | tr -d ' \n' | sed "$split_objects" \
+                    | grep '"active":true' \
+                    | grep -F "\"tab_id\":\"$tab_id\"" \
+                    | sed -n 's/.*"id":"\([^"]*\)".*/\1/p' | head -n 1
+            )
+        fi
     fi
 fi
 
@@ -107,12 +122,12 @@ existing="$STATE_DIR/$session_id.json"
 # Carry the tab forward. Only two events look it up, but every event rewrites
 # this file — without this, the tab found at the start of a turn is erased by
 # the first tool call that follows it.
-if [ -z "$tab_id" ] && [ -f "$existing" ]; then
-    tab_id=$(
-        sed -n 's/.*"tabId"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$existing" \
-            | head -n 1
-    )
-fi
+carry() {
+    [ -f "$existing" ] || return 0
+    sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" "$existing" | head -n 1
+}
+[ -n "$tab_id" ] || tab_id=$(carry tabId)
+[ -n "$pane_id" ] || pane_id=$(carry paneId)
 
 mkdir -p "$STATE_DIR" 2>/dev/null || exit 0
 tmp="$STATE_DIR/.$session_id.$$"
@@ -128,6 +143,7 @@ cat > "$tmp" <<EOF
   "cwd": "$cwd",
   "termProgram": "${TERM_PROGRAM:-}",
   "tabId": "$tab_id",
+  "paneId": "$pane_id",
   "updatedAt": $(date +%s)
 }
 EOF

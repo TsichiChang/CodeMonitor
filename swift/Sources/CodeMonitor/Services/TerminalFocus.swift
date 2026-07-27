@@ -77,12 +77,16 @@ enum TerminalFocus {
   // MARK: - Entry point
 
   static func focus(
-    pid: Int32?, ttyHint: String?, cwd: String, tabID: String? = nil
+    pid: Int32?, ttyHint: String?, cwd: String, tabID: String? = nil, paneID: String? = nil
   ) async -> FocusResult {
-    // A hook-recorded tab is the only exact answer available for Otty, so it is
-    // tried before anything else — including before a pid, which this path does
-    // not need.
-    if let tabID, await focusOttyTab(cwd: cwd, preferring: tabID) { return .ok }
+    // A hook-recorded location is the only exact answer available for Otty, so
+    // it is tried before anything else — including before a pid, which this
+    // path does not need.
+    if paneID != nil || tabID != nil,
+      await focusOttyTab(cwd: cwd, preferringPane: paneID, orTab: tabID)
+    {
+      return .ok
+    }
 
     guard let pid else { return .noProcess }
 
@@ -188,40 +192,58 @@ enum TerminalFocus {
   /// its AppleScript `tty` property — the one thing that would disambiguate —
   /// always returns an empty string. A single cwd match is exact, which covers
   /// the normal case of one agent per project.
-  private static func focusOttyTab(cwd: String, preferring tabID: String? = nil) async -> Bool {
+  private static func focusOttyTab(
+    cwd: String, preferringPane paneID: String? = nil, orTab tabID: String? = nil
+  ) async -> Bool {
     guard await isRunning(bundleID: ottyBundleID), let cli = await ottyCLIPath() else {
       return false
     }
-    guard
-      let listed = await Shell.run(cli, ["tab", "list", "--json"], timeout: 5),
-      listed.succeeded,
-      let data = listed.stdout.data(using: .utf8),
-      let response = try? JSONDecoder().decode(OttyResponse.self, from: data),
-      let tabs = response.data
-    else { return false }
 
-    // A recorded tab is used only if it still exists *and* still sits in this
-    // session's directory. The recording is a snapshot of whatever was focused
-    // when the user last typed, so the check is what separates "the tab this
-    // session lives in" from "a tab the user happened to be looking at"
-    // (ADR-0009). Tabs are also reused: an id can outlive the session that
+    // A recorded location is used only if it still exists *and* still sits in
+    // this session's directory. The recording is a snapshot of whatever was
+    // focused when the user last typed, so the check is what separates "where
+    // this session lives" from "what the user happened to be looking at"
+    // (ADR-0009). Ids are also reused: one can outlive the session that
     // registered it.
+    //
+    // The pane is preferred over the tab because a tab can hold several
+    // sessions side by side — this machine runs three in one — and focusing
+    // the tab alone would land on whichever of them was last in front.
+    if let paneID, let panes = await ottyList(cli, "pane"),
+      let recorded = panes.first(where: { $0.id == paneID }), recorded.cwd == cwd,
+      await run(cli, ["pane", "focus", "--pane", paneID])
+    {
+      return await activate(bundleID: ottyBundleID)
+    }
+
+    guard let tabs = await ottyList(cli, "tab") else { return false }
     let target: OttyTab? =
-      if let tabID, let recorded = tabs.first(where: { $0.id == tabID }), recorded.cwd == cwd {
-        recorded
-      } else if tabID != nil {
-        nil  // recorded tab is gone or has moved on — do not guess in its place
+      if let tabID {
+        tabs.first { $0.id == tabID && $0.cwd == cwd }
       } else {
         pickOttyTab(from: tabs, cwd: cwd)
       }
-    guard let target else { return false }
 
-    guard
-      let focused = await Shell.run(cli, ["tab", "focus", "--tab", target.id], timeout: 5),
-      focused.succeeded
+    // A recorded location that no longer checks out falls through to directory
+    // matching rather than being trusted anyway.
+    guard let target = target ?? (paneID != nil || tabID != nil ? pickOttyTab(from: tabs, cwd: cwd) : nil)
     else { return false }
 
+    guard await run(cli, ["tab", "focus", "--tab", target.id]) else { return false }
     return await activate(bundleID: ottyBundleID)
+  }
+
+  private static func ottyList(_ cli: String, _ kind: String) async -> [OttyTab]? {
+    guard let output = await Shell.run(cli, [kind, "list", "--json"], timeout: 5),
+      output.succeeded,
+      let data = output.stdout.data(using: .utf8),
+      let response = try? JSONDecoder().decode(OttyResponse.self, from: data)
+    else { return nil }
+    return response.data
+  }
+
+  private static func run(_ cli: String, _ arguments: [String]) async -> Bool {
+    await Shell.run(cli, arguments, timeout: 5)?.succeeded ?? false
   }
 
   /// Chooses the best tab for `cwd`: exact matches first, then a tab sitting in

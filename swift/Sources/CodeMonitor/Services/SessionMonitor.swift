@@ -105,7 +105,8 @@ final class SessionMonitor {
     // where its shell started the agent, and the shell does not follow the
     // agent around (ADR-0009).
     let result = await TerminalFocus.focus(
-      pid: pid, ttyHint: tty, cwd: session.projectPath, tabID: session.tabID)
+      pid: pid, ttyHint: tty, cwd: session.projectPath,
+      tabID: session.tabID, paneID: session.paneID)
     if !result.isOK { focusError = result.message }
     return result
   }
