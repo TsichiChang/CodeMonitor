@@ -149,20 +149,26 @@ private struct BreathingBackground: ViewModifier {
   let scheme: ColorScheme
 
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @State private var lit = false
 
   func body(content: Content) -> some View {
     let breath = Palette.breath(for: state, scheme: scheme)
     content.background {
       if let breath, !reduceMotion {
-        // No `trigger:` — that overload steps through the phases *once* per
-        // change and then stops, which made a card pulse a single time when its
-        // state changed and sit still forever after. This one cycles.
-        PhaseAnimator([false, true]) { lit in
-          Rectangle().fill(lit ? breath.to : breath.from)
-        } animation: { _ in
+        Rectangle()
+          .fill(lit ? breath.to : breath.from)
+          // Scoped to `lit`, deliberately. `PhaseAnimator` was doing this job
+          // and its animation applied to everything the redraw touched — so
+          // resizing the window animated the card backgrounds' *frames* too,
+          // and each one visibly swept out to its new width. Keying the
+          // animation to the one value that should animate leaves layout alone.
+          //
           // The token period covers a full cycle; one phase is half of it.
-          .easeInOut(duration: breath.period / 2)
-        }
+          .animation(
+            .easeInOut(duration: breath.period / 2).repeatForever(autoreverses: true),
+            value: lit
+          )
+          .onAppear { lit = true }
       } else {
         Rectangle().fill(breath?.to ?? Palette.resting(scheme))
       }
