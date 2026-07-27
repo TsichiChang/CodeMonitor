@@ -1,6 +1,10 @@
 # Dependencies
 node_modules/
 
+# Swift build output
+swift/.build/
+swift/build/
+
 # Agent context (auto-generated, not worth versioning)
 .glaze_memory/
 

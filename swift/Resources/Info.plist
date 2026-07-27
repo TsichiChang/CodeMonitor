@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleExecutable</key>
+	<string>CodeMonitor</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.ziqizhang.codemonitor</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>Code Monitor</string>
+	<key>CFBundleDisplayName</key>
+	<string>Code Session Monitor</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<!-- Required for jumping to a Terminal.app / iTerm2 tab via AppleScript.
+	     Otty is driven through its own CLI socket and needs no Apple Events. -->
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Code Monitor controls your terminal app so it can jump to the tab running a coding session.</string>
+</dict>
+</plist>

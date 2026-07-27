@@ -1,0 +1,106 @@
+/// The dashboard window: every detected session, grouped by tool.
+
+import SwiftUI
+
+struct DashboardView: View {
+  @Environment(SessionMonitor.self) private var monitor
+
+  private let columns = [GridItem(.adaptive(minimum: 240), spacing: 10, alignment: .top)]
+
+  var body: some View {
+    @Bindable var monitor = monitor
+
+    Group {
+      if monitor.snapshot.sessions.isEmpty {
+        emptyState
+      } else {
+        sessionList
+      }
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .navigationTitle("Code Sessions")
+    .toolbar {
+      ToolbarItem(placement: .primaryAction) { counts }
+    }
+    .alert(
+      "Couldn't jump to the terminal",
+      isPresented: .init(
+        get: { monitor.focusError != nil },
+        set: { if !$0 { monitor.focusError = nil } }
+      ),
+      presenting: monitor.focusError
+    ) { _ in
+      Button("OK", role: .cancel) {}
+    } message: { error in
+      Text(error)
+    }
+  }
+
+  private var sessionList: some View {
+    ScrollView {
+      VStack(alignment: .leading, spacing: 28) {
+        ForEach(monitor.snapshot.groupedByTool, id: \.tool) { group in
+          toolGroup(group.tool, items: group.items)
+        }
+      }
+      .padding(.horizontal, 20)
+      .padding(.vertical, 16)
+    }
+  }
+
+  private func toolGroup(_ tool: ToolKind, items: [SessionInfo]) -> some View {
+    VStack(alignment: .leading, spacing: 12) {
+      HStack(spacing: 8) {
+        Image(systemName: tool.symbolName)
+          .font(.caption)
+          .foregroundStyle(.tertiary)
+        Text(tool.label.uppercased())
+          .font(.caption.weight(.semibold))
+          .kerning(0.5)
+          .foregroundStyle(.tertiary)
+        Text("\(items.count)")
+          .font(.caption)
+          .monospacedDigit()
+          .foregroundStyle(.tertiary)
+        Divider()
+      }
+      LazyVGrid(columns: columns, spacing: 10) {
+        ForEach(items) { session in
+          SessionCardView(session: session) {
+            Task { await monitor.focus(session) }
+          }
+        }
+      }
+    }
+  }
+
+  private var counts: some View {
+    HStack(spacing: 6) {
+      countBadge(monitor.snapshot.counts.running, "running", Palette.statusRunning)
+      countBadge(monitor.snapshot.counts.waiting, "waiting", Palette.statusWaiting)
+      countBadge(monitor.snapshot.counts.idle, "idle", .secondary)
+    }
+  }
+
+  private func countBadge(_ value: Int, _ label: String, _ color: Color) -> some View {
+    HStack(spacing: 4) {
+      Circle().fill(color).frame(width: 6, height: 6)
+      Text("\(value) \(label)")
+        .font(.caption)
+        .monospacedDigit()
+    }
+    .padding(.horizontal, 8)
+    .padding(.vertical, 3)
+    .background(Capsule().fill(color.opacity(0.12)))
+  }
+
+  private var emptyState: some View {
+    ContentUnavailableView {
+      Label("No active sessions", systemImage: "terminal")
+    } description: {
+      Text(
+        "Start a Claude Code, Codex, or OpenCode session in a terminal and it will appear here."
+      )
+    }
+  }
+}
