@@ -16,7 +16,7 @@ actor SessionScanner {
 
   func scan() async -> SessionSnapshot {
     let now = Date()
-    let (processes, scanOK) = await ProcessScanner.scan()
+    let (processes, scanOK) = ProcessScanner.scan()
 
     var sessions = sources.flatMap { $0.sessions(now: now) }
     attachLiveProcesses(processes, to: &sessions)
@@ -61,8 +61,26 @@ actor SessionScanner {
   /// A process is never proof of *which* session it is (ADR-0002) — several
   /// sessions can share a directory — so this is a decoration, not an identity.
   private func attachLiveProcesses(_ processes: [LiveProcess], to sessions: inout [SessionInfo]) {
+    var remaining = processes
+    var claimed = Set<Int>()
+
+    // A process resumed with an explicit session id needs no guessing at all.
+    var indexByID: [String: Int] = [:]
+    for (index, session) in sessions.enumerated() { indexByID[session.id] = index }
+
+    remaining.removeAll { process in
+      guard let sessionID = process.sessionID,
+        let index = indexByID["\(process.tool.rawValue):\(sessionID)"]
+      else { return false }
+      sessions[index].pid = process.pid
+      sessions[index].tty = process.tty
+      sessions[index].live = true
+      claimed.insert(index)
+      return true
+    }
+
     var byDirectory: [ToolKind: [String: LiveProcess]] = [:]
-    for process in processes {
+    for process in remaining {
       guard let cwd = process.cwd else { continue }
       byDirectory[process.tool, default: [:]][cwd] = process
     }
@@ -73,7 +91,7 @@ actor SessionScanner {
     // session never ages out, keep every past session in that directory on
     // screen forever. The most recently active one is the best available guess.
     var bestIndex: [String: Int] = [:]
-    for index in sessions.indices {
+    for index in sessions.indices where !claimed.contains(index) {
       let session = sessions[index]
       guard byDirectory[session.tool]?[session.projectPath] != nil else { continue }
       let key = "\(session.tool.rawValue):\(session.projectPath)"

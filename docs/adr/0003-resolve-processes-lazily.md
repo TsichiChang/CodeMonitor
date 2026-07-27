@@ -1,22 +1,35 @@
-# Resolve live processes lazily, at jump time
+---
+status: superseded — process state is read on every scan, see below
+---
 
-Because a session's UUID cannot be recovered from a process (ADR-0002), matching
-the two during every poll can only be a guess based on working directory — and
-that guess is what produced phantom cards. It also cost a `ps` plus one `lsof`
-per agent process every two seconds, purely to decorate cards with a pid nobody
-reads.
+# Live processes are read on every scan, through libproc
 
-Sessions are therefore listed from their tool's own records, without a pid. The
-process is looked up only when the user actually jumps to a terminal, where a
-wrong guess is visible and recoverable rather than silently corrupting the list.
+This decision originally went the other way: process lookup was to happen only
+when the user jumped to a terminal. Both of its premises turned out to be wrong.
+
+**"It costs a `ps` plus an `lsof` per agent, every two seconds."** True of
+subprocesses, not of the information. `proc_listpids`, `KERN_PROCARGS2` and
+`proc_pidinfo` return the same command lines, working directories and terminals
+without spawning anything: about 4ms of a 36ms scan. The whole scan used to cost
+69ms, most of it waiting on children.
+
+**"…purely to decorate cards with a pid nobody reads."** The pid turned out to
+carry the two things the list most depends on. It decides whether a session is
+still open — a store can be quiet for hours while its agent sits there alive,
+and without that signal such a session drops off the display it exists to be
+seen on. And `KERN_PROCARGS2` exposes the `--resume` argument, which names the
+session exactly, replacing a directory guess with an identity.
 
 ## Consequences
 
-`live` no longer props up state classification. It currently keeps a stalled
-tool call in `waiting` rather than letting it decay to `idle`, so for tools
-without an authoritative state channel the `waiting` window gets shorter. This
-is acceptable only because those channels are the plan (ADR-0001); if Codex
-stays on passive polling indefinitely, revisit this.
+The guess this ADR wanted to avoid is still a guess, just a smaller one. A
+process whose command line carries no session id can only be matched by
+directory, several sessions can share one, and the best available answer is the
+most recently active. That inference is confined to attaching a pid; it never
+decides what a session *is* (ADR-0002).
 
-A session that exists only as a process — a freshly started agent that has not
-written its first record — will not appear until it does.
+Reading another user's process is denied by the kernel, which is what we want:
+it means the process is not ours.
+
+Jump-time resolution stays for sessions the scan could not match at all — a
+transcript older than the read horizon whose agent is still running.

@@ -73,7 +73,7 @@ final class SessionMonitor {
     if pid == nil {
       // Matched on the Project: an agent process stays in the directory it was
       // launched in even after the session moves elsewhere (ADR-0002).
-      let (processes, _) = await ProcessScanner.scan()
+      let (processes, _) = ProcessScanner.scan()
       if let match = processes.first(where: {
         $0.tool == session.tool && $0.cwd == session.projectPath
       }) {

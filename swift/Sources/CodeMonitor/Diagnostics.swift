@@ -176,7 +176,7 @@ enum Diagnostics {
 
   /// Describes how the focus logic identifies this session's terminal.
   private static func hostDescription(pid: Int32) async -> String {
-    let termProgram = await ProcessScanner.environmentValue("TERM_PROGRAM", of: pid)
+    let termProgram = ProcessScanner.environmentValue("TERM_PROGRAM", of: pid)
     let matched = TerminalFocus.terminals.first {
       guard let expected = $0.termProgram, let actual = termProgram else { return false }
       return expected.caseInsensitiveCompare(actual) == .orderedSame

@@ -80,7 +80,7 @@ enum TerminalFocus {
     guard let pid else { return .noProcess }
 
     var tty = ttyHint
-    if tty == nil { tty = await ProcessScanner.tty(of: pid) }
+    if tty == nil { tty = ProcessScanner.tty(of: pid) }
     let devTTY = normalizeTTY(tty)
 
     // With a known host we address it directly — no probing other terminals,
@@ -124,7 +124,7 @@ enum TerminalFocus {
   /// Identifies the hosting terminal, preferring the session's exported
   /// `TERM_PROGRAM` and falling back to a ppid walk for terminals that set none.
   private static func identifyHost(pid: Int32) async -> TerminalApp? {
-    if let termProgram = await ProcessScanner.environmentValue("TERM_PROGRAM", of: pid),
+    if let termProgram = ProcessScanner.environmentValue("TERM_PROGRAM", of: pid),
       let match = terminals.first(where: {
         $0.termProgram?.caseInsensitiveCompare(termProgram) == .orderedSame
       })
@@ -137,7 +137,7 @@ enum TerminalFocus {
   private static func findHostByProcessTree(pid: Int32) async -> TerminalApp? {
     var current = pid
     for _ in 0..<12 where current > 1 {
-      guard let (ppid, command) = await ProcessScanner.parent(of: current) else { return nil }
+      guard let (ppid, command) = ProcessScanner.parent(of: current) else { return nil }
       if let match = terminals.first(where: { command.matches($0.commandPattern) }) {
         return match
       }

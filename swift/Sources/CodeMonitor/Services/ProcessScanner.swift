@@ -1,10 +1,14 @@
-/// Best-effort live-process discovery via `ps` / `lsof`.
+/// Live-process discovery through libproc, without spawning anything.
 ///
-/// Live processes confirm a transcript-derived session is still open, supply
-/// its pid/tty for terminal jumping, and let us trust a long-lived "waiting"
-/// state. Everything here degrades gracefully: a denied or missing tool just
-/// means fewer confirmed sessions, never a failed poll.
+/// This used to shell out to `ps -axww` and one `lsof` per agent, costing about
+/// 115ms of a poll. The same information comes from `proc_listpids`,
+/// `KERN_PROCARGS2` and `proc_pidinfo` in roughly 4ms, so process state can be
+/// read on every cycle rather than being rationed (ADR-0003).
+///
+/// Everything degrades quietly: reading another user's process is denied, which
+/// simply means it is not one of ours.
 
+import Darwin
 import Foundation
 
 struct LiveProcess: Sendable {
@@ -12,21 +16,19 @@ struct LiveProcess: Sendable {
   let pid: Int32
   let tty: String?
   var cwd: String?
+  /// Session UUID recovered from the command line, when it is trustworthy.
+  var sessionID: String?
 }
 
 enum ProcessScanner {
-  /// The CLIs run either as native binaries (`codex`) or node/bun-wrapped
-  /// scripts (`node …/claude-code/cli.js`), so match both the bare command and
-  /// the package-path forms.
+  /// The CLIs run either as native binaries or as wrapped scripts, so both the
+  /// bare command and the package-path forms are matched.
   private static let toolPatterns: [(ToolKind, [String])] = [
     (.codex, ["(?:^|/)codex(?:\\s|$)", "codex-cli", "openai[-/].*codex"]),
     (.opencode, ["(?:^|/)opencode(?:\\s|$)", "opencode[-/]"]),
     (
       .claude,
-      [
-        "(?:^|/)claude(?:\\s|$)", "claude-code", "anthropic[-/].*claude",
-        "\\.claude/local/",
-      ]
+      ["(?:^|/)claude(?:\\s|$)", "claude-code", "anthropic[-/].*claude", "\\.claude/local/"]
     ),
   ]
 
@@ -36,12 +38,16 @@ enum ProcessScanner {
   ]
 
   static func tool(forCommand command: String) -> ToolKind? {
-    // Reject on a literal substring first. Nearly every process on the machine
-    // mentions none of these, and `range(of:options:.regularExpression)`
-    // recompiles its pattern on each call — running the full pattern set against
-    // every one of ~700 command lines was by far the costliest thing per scan.
+    // Reject on a literal substring first: almost no process mentions any of
+    // these, and `.regularExpression` recompiles its pattern on every call.
+    //
+    // The literal test is done over raw bytes rather than with
+    // `range(of:options:.caseInsensitive)`, which bridges to NSString and folds
+    // case with locale awareness. Across every process on the machine that one
+    // call was the single most expensive thing in a scan — about 36ms against
+    // 0.6ms for the equivalent byte scan.
     for (tool, hint) in toolHints {
-      guard command.range(of: hint, options: .caseInsensitive) != nil else { continue }
+      guard command.containsASCIICaseInsensitive(hint) else { continue }
       guard let patterns = toolPatterns.first(where: { $0.0 == tool })?.1 else { continue }
       for pattern in patterns where command.matches(pattern) {
         return tool
@@ -50,109 +56,176 @@ enum ProcessScanner {
     return nil
   }
 
-  /// Scans every process for a known agent CLI, resolving each match's cwd.
-  static func scan() async -> (processes: [LiveProcess], ok: Bool) {
-    guard
-      let output = await Shell.run("/bin/ps", ["-axww", "-o", "pid=,tty=,command="], timeout: 8),
-      output.succeeded
-    else {
-      return ([], false)
-    }
+  // MARK: - Scan
 
-    var matched: [(pid: Int32, tty: String?, tool: ToolKind)] = []
-    for line in output.stdout.split(separator: "\n") {
-      // pid  tty  command…   (tty is "??" for processes with no controlling terminal)
-      let fields = line.trimmingCharacters(in: .whitespaces)
-        .split(separator: " ", maxSplits: 2, omittingEmptySubsequences: true)
-      guard fields.count == 3, let pid = Int32(fields[0]) else { continue }
-      let tty = fields[1] == "??" ? nil : String(fields[1])
-      // `ps` pads its columns, so the command still carries leading spaces —
-      // which would break the `^` anchor in the tool patterns.
-      let command = fields[2].trimmingCharacters(in: .whitespaces)
-      guard let tool = tool(forCommand: command) else { continue }
-      matched.append((pid, tty, tool))
-    }
+  static func scan() -> (processes: [LiveProcess], ok: Bool) {
+    let pids = allPIDs()
+    guard !pids.isEmpty else { return ([], false) }
 
-    // Resolve cwds concurrently — each is an independent `lsof` call.
     var processes: [LiveProcess] = []
-    await withTaskGroup(of: LiveProcess.self) { group in
-      for match in matched {
-        group.addTask {
-          LiveProcess(
-            tool: match.tool,
-            pid: match.pid,
-            tty: match.tty,
-            cwd: await cwd(of: match.pid)
-          )
-        }
-      }
-      for await process in group { processes.append(process) }
+    for pid in pids where pid > 0 {
+      // Only the command line here. Parsing each process's environment as well
+      // costs more than the `ps`/`lsof` calls this replaced — a few hundred
+      // readable processes with dozens of variables each — and the environment
+      // is wanted for exactly one process, at jump time.
+      guard let command = commandLine(pid), let tool = tool(forCommand: command) else { continue }
+      processes.append(
+        LiveProcess(
+          tool: tool,
+          pid: pid,
+          tty: tty(of: pid),
+          cwd: cwd(of: pid),
+          sessionID: sessionID(fromCommand: command)
+        )
+      )
     }
     return (processes, true)
   }
 
-  /// Working directory of a process, or nil when lsof is unavailable/denied.
-  ///
-  /// A cwd of "/" is reported as unknown. Processes launched by launchd rather
-  /// than from a shell inherit it, so it says "this was not started in a
-  /// project" rather than naming one — and matching sessions on it groups
-  /// unrelated agents together under a session labelled "/".
-  static func cwd(of pid: Int32) async -> String? {
-    guard
-      let output = await Shell.run(
-        "/usr/sbin/lsof",
-        ["-a", "-p", String(pid), "-d", "cwd", "-Fn"],
-        timeout: 8
-      )
-    else { return nil }
+  private static func allPIDs() -> [pid_t] {
+    var size = proc_listpids(UInt32(PROC_ALL_PIDS), 0, nil, 0)
+    guard size > 0 else { return [] }
+    var pids = [pid_t](repeating: 0, count: Int(size) / MemoryLayout<pid_t>.size)
+    size = proc_listpids(UInt32(PROC_ALL_PIDS), 0, &pids, size)
+    guard size > 0 else { return [] }
+    return Array(pids.prefix(Int(size) / MemoryLayout<pid_t>.size))
+  }
 
-    for line in output.stdout.split(separator: "\n") where line.hasPrefix("n") {
-      let path = line.dropFirst().trimmingCharacters(in: .whitespaces)
-      if !path.isEmpty { return path == "/" ? nil : path }
+  // MARK: - Per-process reads
+
+  /// Working directory of a process.
+  ///
+  /// "/" is reported as unknown: processes launched by launchd rather than from
+  /// a shell inherit it, so it says "not started in a project" rather than
+  /// naming one, and matching sessions on it would group unrelated agents.
+  static func cwd(of pid: pid_t) -> String? {
+    var info = proc_vnodepathinfo()
+    let size = MemoryLayout<proc_vnodepathinfo>.size
+    let read = withUnsafeMutablePointer(to: &info) {
+      proc_pidinfo(pid, PROC_PIDVNODEPATHINFO, 0, $0, Int32(size))
+    }
+    guard read == Int32(size) else { return nil }
+
+    let path = withUnsafePointer(to: &info.pvi_cdir.vip_path) {
+      $0.withMemoryRebound(to: CChar.self, capacity: Int(MAXPATHLEN)) { String(cString: $0) }
+    }
+    return path.isEmpty || path == "/" ? nil : path
+  }
+
+  /// Controlling terminal of a process, e.g. "ttys004".
+  static func tty(of pid: pid_t) -> String? {
+    var info = proc_bsdinfo()
+    let size = MemoryLayout<proc_bsdinfo>.size
+    let read = withUnsafeMutablePointer(to: &info) {
+      proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, $0, Int32(size))
+    }
+    guard read == Int32(size), info.e_tdev != UInt32.max else { return nil }
+    guard let name = devname(dev_t(info.e_tdev), S_IFCHR) else { return nil }
+    let tty = String(cString: name)
+    return tty.isEmpty ? nil : tty
+  }
+
+  /// Value of an environment variable in a running process.
+  ///
+  /// This is how the hosting terminal is identified: `TERM_PROGRAM` is exported
+  /// into the session's own environment and survives any re-parenting, unlike
+  /// walking the ppid chain (which never reaches terminals that spawn their
+  /// shells from a daemon).
+  static func environmentValue(_ key: String, of pid: pid_t) -> String? {
+    guard let strings = processStrings(pid) else { return nil }
+    let prefix = "\(key)="
+    for entry in strings.values.dropFirst(strings.argc) where entry.hasPrefix(prefix) {
+      return String(entry.dropFirst(prefix.count))
     }
     return nil
   }
 
-  /// Controlling terminal of a process, e.g. "ttys004".
-  static func tty(of pid: Int32) async -> String? {
-    guard let output = await Shell.run("/bin/ps", ["-o", "tty=", "-p", String(pid)], timeout: 5)
-    else { return nil }
-    let tty = output.trimmed
-    return tty.isEmpty || tty == "??" ? nil : tty
+  /// Parent process id and command, for terminals that export no TERM_PROGRAM.
+  static func parent(of pid: pid_t) -> (ppid: pid_t, command: String)? {
+    var info = proc_bsdinfo()
+    let size = MemoryLayout<proc_bsdinfo>.size
+    let read = withUnsafeMutablePointer(to: &info) {
+      proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, $0, Int32(size))
+    }
+    guard read == Int32(size) else { return nil }
+    let ppid = pid_t(info.pbi_ppid)
+    return (ppid, commandLine(ppid) ?? "")
   }
 
-  /// Value of an environment variable in a *running* process, read via `ps -E`.
+  // MARK: - Session id from the command line
+
+  /// The session UUID a process was resumed with, when it identifies *this*
+  /// session.
   ///
-  /// This is how we identify the hosting terminal: `TERM_PROGRAM` is exported
-  /// into the session's own environment and survives any process re-parenting,
-  /// unlike walking the ppid chain.
-  static func environmentValue(_ key: String, of pid: Int32) async -> String? {
-    guard let output = await Shell.run("/bin/ps", ["-Eww", "-o", "command=", "-p", String(pid)], timeout: 5)
-    else { return nil }
-
-    // The environment is appended as space-separated KEY=value pairs.
+  /// `--fork-session` disqualifies it: a forked session's argv names the
+  /// session it forked *from*, so using it would attach a process to somebody
+  /// else's session — worse than having no id at all.
+  static func sessionID(fromCommand command: String) -> String? {
+    guard !command.contains("--fork-session") else { return nil }
     guard
-      let range = output.stdout.range(
-        of: "\(NSRegularExpression.escapedPattern(for: key))=([^\\s]*)",
-        options: .regularExpression
-      )
+      let range = command.range(
+        of: "--resume[= ]([0-9a-fA-F-]{36})", options: .regularExpression)
     else { return nil }
-
-    let pair = output.stdout[range]
-    guard let equals = pair.firstIndex(of: "=") else { return nil }
-    let value = String(pair[pair.index(after: equals)...])
-    return value.isEmpty ? nil : value
+    return String(command[range].suffix(36))
   }
 
-  /// Parent process id, used to walk up toward a hosting terminal.
-  static func parent(of pid: Int32) async -> (ppid: Int32, command: String)? {
-    guard
-      let output = await Shell.run("/bin/ps", ["-o", "ppid=,command=", "-p", String(pid)], timeout: 5)
-    else { return nil }
+  // MARK: - KERN_PROCARGS2
 
-    let fields = output.trimmed.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
-    guard fields.count == 2, let ppid = Int32(fields[0]) else { return nil }
-    return (ppid, fields[1].trimmingCharacters(in: .whitespaces))
+  /// The command line of a process, or nil when it is not ours to read.
+  static func commandLine(_ pid: pid_t) -> String? {
+    guard let strings = processStrings(pid, stoppingAfterArguments: true) else { return nil }
+    return strings.values.prefix(strings.argc).joined(separator: " ")
+  }
+
+  private struct ProcStrings {
+    let argc: Int
+    /// `argc` arguments, then the environment as `KEY=value` entries.
+    let values: [String]
+  }
+
+  /// Reads a process's argv and environment in one syscall.
+  ///
+  /// Layout: `argc`, the executable path, alignment padding, `argc`
+  /// NUL-terminated arguments, then the environment as `KEY=value` strings.
+  ///
+  /// `stoppingAfterArguments` exists because the scan reads every process on
+  /// the machine but wants only the command line; decoding each one's whole
+  /// environment as well dominated the scan.
+  private static func processStrings(
+    _ pid: pid_t, stoppingAfterArguments: Bool = false
+  ) -> ProcStrings? {
+    var size = 0
+    var mib: [Int32] = [CTL_KERN, KERN_PROCARGS2, pid]
+    guard sysctl(&mib, 3, nil, &size, nil, 0) == 0, size > MemoryLayout<Int32>.size else {
+      return nil
+    }
+    var buffer = [CChar](repeating: 0, count: size)
+    guard sysctl(&mib, 3, &buffer, &size, nil, 0) == 0 else { return nil }
+
+    var argc: Int32 = 0
+    memcpy(&argc, buffer, MemoryLayout<Int32>.size)
+    guard argc > 0 else { return nil }
+
+    var index = MemoryLayout<Int32>.size
+    while index < size, buffer[index] != 0 { index += 1 }  // executable path
+    while index < size, buffer[index] == 0 { index += 1 }  // padding
+
+    var strings: [String] = []
+    var current: [CChar] = []
+    while index < size {
+      if buffer[index] == 0 {
+        if !current.isEmpty {
+          strings.append(String(decoding: current.map(UInt8.init(bitPattern:)), as: UTF8.self))
+          current.removeAll(keepingCapacity: true)
+          if stoppingAfterArguments, strings.count == Int(argc) { break }
+        }
+      } else {
+        current.append(buffer[index])
+      }
+      index += 1
+    }
+    guard !strings.isEmpty else { return nil }
+    return ProcStrings(argc: min(Int(argc), strings.count), values: strings)
   }
 }
 
@@ -160,5 +233,27 @@ extension String {
   /// Case-insensitive regular-expression test.
   func matches(_ pattern: String) -> Bool {
     range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil
+  }
+
+  /// Whether this string contains `needle`, comparing ASCII letters without
+  /// regard to case and without bridging to NSString.
+  ///
+  /// `needle` must be lowercase ASCII: the fold is a single OR, which maps
+  /// A–Z onto a–z and leaves anything already lowercase alone.
+  func containsASCIICaseInsensitive(_ needle: String) -> Bool {
+    let pattern = Array(needle.utf8)
+    guard !pattern.isEmpty else { return true }
+    let text = Array(utf8)
+    guard text.count >= pattern.count else { return false }
+
+    for start in 0...(text.count - pattern.count) {
+      var matched = true
+      for offset in 0..<pattern.count where (text[start + offset] | 0x20) != pattern[offset] {
+        matched = false
+        break
+      }
+      if matched { return true }
+    }
+    return false
   }
 }
