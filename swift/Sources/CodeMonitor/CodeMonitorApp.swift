@@ -18,6 +18,10 @@ struct CodeMonitorApp: App {
         .preferredColorScheme(appearance.colorScheme)
     }
     .defaultSize(width: 1024, height: 620)
+    // Without this the dashboard stays shut on every later launch once it has
+    // been closed even a single time — wrong for a window whose whole job is
+    // to be sitting open on a spare display.
+    .defaultLaunchBehavior(.presented)
     .commands {
       CommandGroup(after: .toolbar) {
         Button("Refresh Now") {

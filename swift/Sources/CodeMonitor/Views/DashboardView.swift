@@ -19,8 +19,16 @@ struct DashboardView: View {
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .navigationTitle("Code Sessions")
-    .toolbar {
-      ToolbarItem(placement: .primaryAction) { counts }
+    .safeAreaInset(edge: .top) {
+      // Kept out of the toolbar: macOS wraps toolbar content in its own
+      // material, which put a grey slab behind the counts that no amount of
+      // styling on them could remove.
+      HStack {
+        Spacer()
+        counts
+      }
+      .padding(.horizontal, 20)
+      .padding(.top, 10)
     }
     .alert(
       "Couldn't jump to the terminal",
@@ -78,20 +86,24 @@ struct DashboardView: View {
     HStack(spacing: 6) {
       countBadge(monitor.snapshot.counts.running, "running", Palette.statusRunning)
       countBadge(monitor.snapshot.counts.waiting, "waiting", Palette.statusWaiting)
-      countBadge(monitor.snapshot.counts.idle, "idle", .secondary)
+      countBadge(monitor.snapshot.counts.idle, "idle", nil)
     }
   }
 
-  private func countBadge(_ value: Int, _ label: String, _ color: Color) -> some View {
+  /// Tinted for the states worth looking at; idle carries no fill at all, so
+  /// the row reads as "two things are happening" rather than three equal
+  /// chips (ADR-0007).
+  private func countBadge(_ value: Int, _ label: String, _ color: Color?) -> some View {
     HStack(spacing: 4) {
-      Circle().fill(color).frame(width: 6, height: 6)
+      Circle().fill(color ?? .secondary).frame(width: 6, height: 6)
       Text("\(value) \(label)")
         .font(.caption)
         .monospacedDigit()
+        .foregroundStyle(color == nil ? .secondary : .primary)
     }
     .padding(.horizontal, 8)
     .padding(.vertical, 3)
-    .background(Capsule().fill(color.opacity(0.12)))
+    .background(Capsule().fill(color?.opacity(0.12) ?? .clear))
   }
 
   private var emptyState: some View {

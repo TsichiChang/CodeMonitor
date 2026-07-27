@@ -23,17 +23,18 @@ enum Palette {
   static let controlSubtleLight = Color(hex: 0xF2F2F5)
   static let controlSubtleDark = Color(hex: 0x232326)
 
-  static let green20Light = Color(hex: 0xDDF3E4)
-  static let green40Light = Color(hex: 0xCCEBD7)
-  static let green20Dark = Color(hex: 0x174933)
-  static let green40Dark = Color(hex: 0x20573E)
+  // Breath endpoints. The swing is wider than it looks like it needs to be:
+  // these are read as a slow modulation over seconds, not as two swatches side
+  // by side, and the eye is far worse at the former. A pair separated by
+  // ΔE ≈ 12 — an unmistakable difference when adjacent — is close to invisible
+  // spread across a 1.2s fade, so each pair here sits around ΔE 20–28.
+  static let greenRestLight = Color(hex: 0xC3E8D1)
+  static let greenRestDark = Color(hex: 0x2C7A55)
 
-  static let orange20Light = Color(hex: 0xFFDFB5)
-  static let orange40Light = Color(hex: 0xFFD19A)
-  static let orange60Light = Color(hex: 0xFFC182)
-  static let orange20Dark = Color(hex: 0x462100)
-  static let orange40Dark = Color(hex: 0x562800)
-  static let orange60Dark = Color(hex: 0x66350C)
+  static let orangeLowLight = Color(hex: 0xFFDFB5)
+  static let orangeHighLight = Color(hex: 0xFFBE6E)
+  static let orangeLowDark = Color(hex: 0x562800)
+  static let orangeHighDark = Color(hex: 0x8A4A10)
 
   /// Menu-bar tint for the most urgent state present.
   static let statusRunning = Color(hex: 0x34C759)
@@ -51,12 +52,12 @@ enum Palette {
     switch state {
     case .running:
       // Pulses between the resting tint and green — "green ↔ not green".
-      return (resting(scheme), dark ? green40Dark : green20Light, 2.4)
+      return (resting(scheme), dark ? greenRestDark : greenRestLight, 2.4)
     case .waiting:
       // Always amber, pulsing between two steps — faster, so it reads as urgent.
       return dark
-        ? (orange40Dark, orange60Dark, 1.2)
-        : (orange20Light, orange40Light, 1.2)
+        ? (orangeLowDark, orangeHighDark, 1.2)
+        : (orangeLowLight, orangeHighLight, 1.2)
     case .idle:
       return nil
     }

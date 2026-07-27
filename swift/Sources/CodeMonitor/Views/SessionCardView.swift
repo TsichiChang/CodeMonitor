@@ -121,7 +121,10 @@ private struct BreathingBackground: ViewModifier {
     let breath = Palette.breath(for: state, scheme: scheme)
     content.background {
       if let breath, !reduceMotion {
-        PhaseAnimator([false, true], trigger: state) { lit in
+        // No `trigger:` — that overload steps through the phases *once* per
+        // change and then stops, which made a card pulse a single time when its
+        // state changed and sit still forever after. This one cycles.
+        PhaseAnimator([false, true]) { lit in
           Rectangle().fill(lit ? breath.to : breath.from)
         } animation: { _ in
           // The token period covers a full cycle; one phase is half of it.
