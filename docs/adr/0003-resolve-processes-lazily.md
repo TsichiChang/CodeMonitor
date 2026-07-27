@@ -13,12 +13,19 @@ subprocesses, not of the information. `proc_listpids`, `KERN_PROCARGS2` and
 without spawning anything: about 4ms of a 36ms scan. The whole scan used to cost
 69ms, most of it waiting on children.
 
-**"…purely to decorate cards with a pid nobody reads."** The pid turned out to
-carry the two things the list most depends on. It decides whether a session is
-still open — a store can be quiet for hours while its agent sits there alive,
-and without that signal such a session drops off the display it exists to be
-seen on. And `KERN_PROCARGS2` exposes the `--resume` argument, which names the
-session exactly, replacing a directory guess with an identity.
+**"…purely to decorate cards with a pid nobody reads."** The pid decides whether
+a session is still open — a store can be quiet for hours while its agent sits
+there alive, and without that signal such a session drops off the display it
+exists to be seen on.
+
+A third claim once stood here and was wrong: that the `--resume <uuid>` argument
+in a process's command line identifies its session. It names the session being
+resumed *from*. Resuming starts a new session with its own transcript, so
+matching on argv attached a live pid to a finished session — which then never
+aged out, because a session with a process never does. Measured on one pair: the
+argv uuid's transcript was ten lines, untouched for seventeen hours, while the
+session its own hook reported was at 1373 lines and still growing. Only a hook
+can say which session a process is running.
 
 ## Consequences
 

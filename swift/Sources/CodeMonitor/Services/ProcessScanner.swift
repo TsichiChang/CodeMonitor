@@ -16,8 +16,6 @@ struct LiveProcess: Sendable {
   let pid: Int32
   let tty: String?
   var cwd: String?
-  /// Session UUID recovered from the command line, when it is trustworthy.
-  var sessionID: String?
 }
 
 enum ProcessScanner {
@@ -74,8 +72,7 @@ enum ProcessScanner {
           tool: tool,
           pid: pid,
           tty: tty(of: pid),
-          cwd: cwd(of: pid),
-          sessionID: sessionID(fromCommand: command)
+          cwd: cwd(of: pid)
         )
       )
     }
@@ -154,20 +151,16 @@ enum ProcessScanner {
 
   // MARK: - Session id from the command line
 
-  /// The session UUID a process was resumed with, when it identifies *this*
-  /// session.
-  ///
-  /// `--fork-session` disqualifies it: a forked session's argv names the
-  /// session it forked *from*, so using it would attach a process to somebody
-  /// else's session — worse than having no id at all.
-  static func sessionID(fromCommand command: String) -> String? {
-    guard !command.contains("--fork-session") else { return nil }
-    guard
-      let range = command.range(
-        of: "--resume[= ]([0-9a-fA-F-]{36})", options: .regularExpression)
-    else { return nil }
-    return String(command[range].suffix(36))
-  }
+  // A process's command line does *not* identify its session, however much the
+  // `--resume <uuid>` argument looks like it does. Resuming starts a new
+  // session whose transcript is a new file; the uuid in argv names the one it
+  // continued from. Observed directly: a process running `--resume f720c441…`
+  // was reported by its own hook as session 78c0e05f…, and the f720c441
+  // transcript had been untouched for seventeen hours while 78c0e05f grew to
+  // 1373 lines. Matching on argv attached the live pid to the dead session,
+  // which then never aged out.
+  //
+  // Only a hook can say which session a process is running (ADR-0010).
 
   // MARK: - KERN_PROCARGS2
 

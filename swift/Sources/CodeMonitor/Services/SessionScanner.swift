@@ -115,23 +115,14 @@ actor SessionScanner {
   /// A process is never proof of *which* session it is (ADR-0002) — several
   /// sessions can share a directory — so this is a decoration, not an identity.
   private func attachLiveProcesses(_ processes: [LiveProcess], to sessions: inout [SessionInfo]) {
-    var remaining = processes
-    var claimed = Set<Int>()
-
-    // A process resumed with an explicit session id needs no guessing at all.
-    var indexByID: [String: Int] = [:]
-    for (index, session) in sessions.enumerated() { indexByID[session.id] = index }
-
-    remaining.removeAll { process in
-      guard let sessionID = process.sessionID,
-        let index = indexByID["\(process.tool.rawValue):\(sessionID)"]
-      else { return false }
-      sessions[index].pid = process.pid
-      sessions[index].tty = process.tty
-      sessions[index].live = true
-      claimed.insert(index)
-      return true
-    }
+    // A process a hook has already spoken for is off the table. The hook knows
+    // which session its process is running; nothing out here does, and letting
+    // the directory guess below reach the same pid would hand it to a second
+    // session as well — which is how a finished session stayed on screen,
+    // propped up by a process that belonged to its successor.
+    let spokenFor = Set(sessions.filter(\.stateIsAuthoritative).compactMap(\.pid))
+    let remaining = processes.filter { !spokenFor.contains($0.pid) }
+    let claimed = Set(sessions.indices.filter { sessions[$0].stateIsAuthoritative })
 
     var byDirectory: [ToolKind: [String: LiveProcess]] = [:]
     for process in remaining {

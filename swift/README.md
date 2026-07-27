@@ -103,7 +103,7 @@ precisely so several can coexist. Do not replace what is there.
 
 | Event | `<state>` | Notes |
 |---|---|---|
-| `SessionStart` | `running` | append ` locate` — see below |
+| `SessionStart` | `idle` | append ` locate` — a new session is awaiting its first prompt |
 | `UserPromptSubmit` | `running` | append ` locate` |
 | `PreToolUse` | `running` | |
 | `PostToolUse` | `running` | |
