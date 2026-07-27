@@ -54,7 +54,8 @@ struct SessionCardView: View {
           .background(Circle().fill(.background.opacity(0.75)))
       }
       .buttonStyle(.plain)
-      .padding(5)
+      .padding(.top, 11)
+      .padding(.trailing, 11)
       .help("Hide until this session does something new")
       .transition(.opacity)
     }
@@ -71,6 +72,10 @@ struct SessionCardView: View {
         .font(.caption)
         .monospacedDigit()
         .foregroundStyle(.tertiary)
+        // The close button is an overlay in this corner. Its width is reserved
+        // whether or not it is showing, so it never lands on top of the elapsed
+        // time and the time never jumps sideways on hover.
+        .padding(.trailing, onDismiss == nil ? 0 : 15)
     }
   }
 
@@ -96,6 +101,12 @@ struct SessionCardView: View {
   private var statusRow: some View {
     HStack(spacing: 8) {
       StatusPill(state: session.state)
+      if session.subagentCount > 0 {
+        Label("\(session.subagentCount)", systemImage: "circle.hexagongrid")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .help("\(session.subagentCount) sub-agent\(session.subagentCount == 1 ? "" : "s") running under this session")
+      }
       if let message = session.lastMessage {
         Text(message)
           .font(.caption)
@@ -138,52 +149,23 @@ private struct BreathingBackground: ViewModifier {
   let scheme: ColorScheme
 
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
-  /// The state being painted underneath while the new one wipes across.
-  @State private var outgoing: SessionState?
-  /// How far the new state has swept, 0…1 from the leading edge.
-  @State private var sweep: CGFloat = 1
-
-  private static let sweepDuration: Double = 0.55
 
   func body(content: Content) -> some View {
-    content
-      .background {
-        ZStack {
-          // The state being replaced stays put and is wiped over, so the change
-          // reads as one colour advancing across the card rather than the whole
-          // card blinking.
-          if let outgoing, sweep < 1 {
-            fill(for: outgoing, animated: false)
-          }
-          fill(for: state, animated: true)
-            .mask(alignment: .leading) {
-              Rectangle().scaleEffect(x: sweep, y: 1, anchor: .leading)
-            }
-        }
-      }
-      .onChange(of: state) { previous, _ in
-        guard !reduceMotion else { return }
-        outgoing = previous
-        sweep = 0
-        withAnimation(.easeOut(duration: Self.sweepDuration)) { sweep = 1 }
-      }
-  }
-
-  @ViewBuilder
-  private func fill(for state: SessionState, animated: Bool) -> some View {
     let breath = Palette.breath(for: state, scheme: scheme)
-    if let breath, animated, !reduceMotion {
-      // No `trigger:` — that overload steps through the phases *once* per
-      // change and then stops, which made a card pulse a single time when its
-      // state changed and sit still forever after. This one cycles.
-      PhaseAnimator([false, true]) { lit in
-        Rectangle().fill(lit ? breath.to : breath.from)
-      } animation: { _ in
-        // The token period covers a full cycle; one phase is half of it.
-        .easeInOut(duration: breath.period / 2)
+    content.background {
+      if let breath, !reduceMotion {
+        // No `trigger:` — that overload steps through the phases *once* per
+        // change and then stops, which made a card pulse a single time when its
+        // state changed and sit still forever after. This one cycles.
+        PhaseAnimator([false, true]) { lit in
+          Rectangle().fill(lit ? breath.to : breath.from)
+        } animation: { _ in
+          // The token period covers a full cycle; one phase is half of it.
+          .easeInOut(duration: breath.period / 2)
+        }
+      } else {
+        Rectangle().fill(breath?.to ?? Palette.resting(scheme))
       }
-    } else {
-      Rectangle().fill(breath?.to ?? Palette.resting(scheme))
     }
   }
 }

@@ -29,6 +29,7 @@ enum Appearance: String, CaseIterable, Identifiable {
 struct SettingsView: View {
   @Environment(SessionMonitor.self) private var monitor
   @AppStorage("appearance") private var appearance = Appearance.system
+  @AppStorage("showDelegatedSessions") private var showDelegated = false
   @State private var interval: Double = 2
 
   var body: some View {
@@ -39,6 +40,11 @@ struct SettingsView: View {
         }
       }
       .pickerStyle(.segmented)
+
+      Toggle("List sub-agents separately", isOn: $showDelegated)
+        .help(
+          "Agents started by a program get one card each instead of being counted "
+            + "on the session that spawned them.")
 
       LabeledContent("Refresh every") {
         HStack {

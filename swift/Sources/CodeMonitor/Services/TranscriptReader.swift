@@ -12,6 +12,9 @@ import Foundation
 /// The trailing conversation entry of a Claude transcript.
 struct ClaudeEntry: Sendable {
   var role: String?
+  /// How the session was started — `cli`, `claude-desktop`, `sdk-cli`, …
+  /// Present on every conversation record, so the tail carries it.
+  var entrypoint: String?
   var stopReason: String?
   var hasToolUse = false
   var cwd: String?
@@ -95,6 +98,7 @@ enum TranscriptReader {
     entry.role = str(message["role"]) ?? str(raw["role"])
     entry.stopReason = str(message["stop_reason"])
     entry.hasToolUse = content.contains { str(dict($0)["type"]) == "tool_use" }
+    entry.entrypoint = str(raw["entrypoint"])
     entry.cwd = str(raw["cwd"])
     entry.gitBranch = str(raw["gitBranch"])
     entry.model = str(message["model"])

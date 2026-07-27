@@ -143,6 +143,7 @@ enum Diagnostics {
     for session in snapshot.sessions {
       let origin = session.stateIsAuthoritative ? "reported" : "inferred"
       print("• \(session.project)  [\(session.tool.rawValue)]  \(session.state.rawValue) (\(origin))")
+      if session.subagentCount > 0 { print("    sub-agents: \(session.subagentCount) running") }
       if let tab = session.tabID { print("    tab:   \(tab)") }
       if let pane = session.paneID { print("    pane:  \(pane)") }
       print("    id:    \(session.id)")

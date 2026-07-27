@@ -127,6 +127,20 @@ file per session, which is why it survives the app being closed. Set
 `CODEMONITOR_STATE_DIR` to relocate it. To undo everything, remove the entries
 from `settings.json` and delete that directory.
 
+## Sub-agents
+
+A program that farms work out to sub-agents gets one transcript per agent, and
+each looks exactly like a session — 26 appeared under one project here against 9
+sessions actually opened by hand. They are folded into a count on the session
+that spawned them (`⬡ 3` on the card) rather than listed, because burying the
+sessions a person is sitting in front of is the one thing this display must not
+do. "List sub-agents separately" in Settings turns the folding off.
+
+They are told apart by `entrypoint`, which every transcript record carries:
+`cli` and `claude-desktop` are people, `sdk-cli` and `sdk-ts` are programs.
+`isSidechain` looks like the right field and is never set. Attribution is by
+project directory — nothing in a transcript names the session that spawned it.
+
 ## How the terminal jump works
 
 The host terminal is identified from the session's own `TERM_PROGRAM`

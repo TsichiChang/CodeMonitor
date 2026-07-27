@@ -64,6 +64,10 @@ final class ClaudeSource: SessionSource {
       gitBranch: entry?.gitBranch,
       model: entry?.model,
       state: Self.classify(entry, age: age),
+      // `sdk-*` entrypoints are agents a program started. Claude Code gives each
+      // one its own transcript, so a single batch job can mint dozens of them —
+      // 26 in one project here, against 9 sessions actually opened by hand.
+      isDelegated: entry?.entrypoint?.hasPrefix("sdk") == true,
       live: false,
       lastActivity: mtime,
       lastMessage: entry?.snippet

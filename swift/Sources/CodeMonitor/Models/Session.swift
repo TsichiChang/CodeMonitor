@@ -94,6 +94,11 @@ struct SessionInfo: Identifiable, Sendable, Hashable {
   /// Pane within that tab. A tab can hold several sessions side by side, so
   /// this is what actually distinguishes them.
   var paneID: String?
+  /// Started by a program rather than a person — an SDK-spawned agent doing a
+  /// piece of someone else's task, not a session anybody is sitting in front of.
+  var isDelegated = false
+  /// Delegated agents currently working underneath this session.
+  var subagentCount = 0
   /// Whether a live agent process backs this session.
   var live: Bool
   /// Last observed activity (transcript mtime).

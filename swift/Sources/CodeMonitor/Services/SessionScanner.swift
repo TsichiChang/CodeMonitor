@@ -24,6 +24,8 @@ actor SessionScanner {
     sessions = sessions.filter { stillCurrent($0, now: now) }
     sessions += unmatchedProcesses(processes, sessions: sessions, now: now)
 
+    sessions = foldDelegated(sessions)
+
     sessions.sort { lhs, rhs in
       lhs.state.order != rhs.state.order
         ? lhs.state.order < rhs.state.order
@@ -92,6 +94,44 @@ actor SessionScanner {
         )
       )
     }
+  }
+
+  /// Replaces delegated agents with a count on the session they belong to.
+  ///
+  /// A program that farms work out to sub-agents produces one transcript per
+  /// agent, and each of those looks exactly like a session: 26 of them appeared
+  /// under one project here against 9 sessions actually opened by hand. Listing
+  /// them individually buries the sessions a person is actually sitting in
+  /// front of, which is the one thing this display must not do (ADR-0007).
+  ///
+  /// They are attributed by project directory. Nothing in a transcript names
+  /// the session that spawned it, and the directory is the only thing they
+  /// demonstrably share.
+  private func foldDelegated(_ sessions: [SessionInfo]) -> [SessionInfo] {
+    guard !UserDefaults.standard.bool(forKey: "showDelegatedSessions") else { return sessions }
+    let delegated = sessions.filter(\.isDelegated)
+    guard !delegated.isEmpty else { return sessions }
+
+    var runningByProject: [String: Int] = [:]
+    for agent in delegated where agent.state == .running {
+      runningByProject[agent.projectPath, default: 0] += 1
+    }
+
+    var kept = sessions.filter { !$0.isDelegated }
+    for index in kept.indices {
+      kept[index].subagentCount = runningByProject[kept[index].projectPath] ?? 0
+    }
+
+    // A batch with no session of its own to hang off still deserves to be
+    // visible — otherwise the work would vanish from the display entirely.
+    let adopted = Set(kept.map(\.projectPath))
+    for (project, count) in runningByProject where !adopted.contains(project) {
+      guard var orphan = delegated.first(where: { $0.projectPath == project }) else { continue }
+      orphan.subagentCount = count
+      orphan.isDelegated = false
+      kept.append(orphan)
+    }
+    return kept
   }
 
   /// Whether a session still belongs on screen (ADR-0005).
