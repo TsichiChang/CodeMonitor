@@ -30,6 +30,26 @@ APP="build/Code Monitor.app/Contents/MacOS/CodeMonitor"
 "$APP" --focus oversea-fop     # actually jump to the matching session
 ```
 
+## App icon
+
+`Resources/AppIcon.icns` is generated, not hand-drawn — `Tools/make-icon.swift`
+draws it with CoreGraphics using the same state colours as the dashboard, so the
+two cannot drift apart. To change it, edit the drawing and re-run:
+
+```bash
+swiftc -O Tools/make-icon.swift -o /tmp/make-icon && /tmp/make-icon /tmp/icon.png
+mkdir -p /tmp/AppIcon.iconset
+for s in 16 32 128 256 512; do
+  sips -z $s $s /tmp/icon.png --out "/tmp/AppIcon.iconset/icon_${s}x${s}.png"
+  sips -z $((s*2)) $((s*2)) /tmp/icon.png --out "/tmp/AppIcon.iconset/icon_${s}x${s}@2x.png"
+done
+iconutil -c icns /tmp/AppIcon.iconset -o Resources/AppIcon.icns
+```
+
+The generator is committed because the previous icon was not: it lived only as
+an ignored binary in the working tree, so when it was deleted there was nothing
+to restore it from.
+
 ## Layout
 
 | Path | Role |

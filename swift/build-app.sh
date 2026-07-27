@@ -30,6 +30,7 @@ rm -rf "$BUNDLE"
 mkdir -p "${BUNDLE}/Contents/MacOS" "${BUNDLE}/Contents/Resources"
 cp "$BIN" "${BUNDLE}/Contents/MacOS/CodeMonitor"
 cp Resources/Info.plist "${BUNDLE}/Contents/Info.plist"
+cp Resources/AppIcon.icns "${BUNDLE}/Contents/Resources/AppIcon.icns"
 
 # Prefer the identity matching this repo's git email, so a machine with several
 # Development certs picks the developer's own rather than whichever is first.
