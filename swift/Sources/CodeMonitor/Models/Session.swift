@@ -140,7 +140,7 @@ struct SessionInfo: Identifiable, Sendable, Hashable {
   /// display where motion is the expensive thing (ADR-0006), and it made
   /// pressing the shortcut twice land back where it started.
   static func inAttentionOrder(_ a: SessionInfo, _ b: SessionInfo) -> Bool {
-    if a.state.order != b.state.order { return a.state.order < b.state.order }
+    if a.attentionGroup != b.attentionGroup { return a.attentionGroup < b.attentionGroup }
     switch a.state {
     case .waiting:
       // Longest wait first: it has cost the most time. Stable, because a
@@ -155,6 +155,29 @@ struct SessionInfo: Identifiable, Sendable, Hashable {
       return a.lastActivity > b.lastActivity
     }
   }
+
+  /// Which band this session sorts into: blocked on you, working, finished but
+  /// unseen, then seen. Only the last two share a `SessionState`, which is why
+  /// this exists rather than the state's own `order` doing the whole job.
+  var attentionGroup: Int {
+    switch state {
+    case .waiting: 0
+    case .running: 1
+    case .idle: isUnread ? 2 : 3
+    }
+  }
+
+  /// Finished since the last time the user went there — so the turn ended and
+  /// nobody has looked at what it said.
+  ///
+  /// Derived from two observations rather than stored as a flag: when the
+  /// session last acted, and when it was last jumped to. A stored flag would
+  /// have to be cleared by something, and every "something" is a chance to
+  /// leave it set on a session that has since spoken again (ADR-0012).
+  ///
+  /// Only idle sessions carry it. A running one has not finished anything yet,
+  /// and a waiting one is already asking louder than this ever could.
+  var isUnread = false
 
   /// Whether this session's state is solid enough to animate a card for.
   ///
@@ -217,7 +240,7 @@ struct SessionSnapshot: Sendable {
   /// itself would keep the whole list in perpetual motion, on a display whose
   /// scarcest resource is motion (ADR-0006).
   var stateSignature: [String] {
-    sessions.map { "\($0.id):\($0.state.rawValue)" }
+    sessions.map { "\($0.id):\($0.state.rawValue):\($0.isUnread)" }
   }
 
   /// Every session in the order the jump shortcut visits them — which is also

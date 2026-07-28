@@ -25,7 +25,10 @@ struct SessionCardView: View {
   @Environment(\.metrics) private var metrics
   @State private var isHovering = false
 
-  private var isIdle: Bool { session.state == .idle }
+  /// Folded only once it has been seen. An idle session that finished while
+  /// nobody was looking keeps its card — the shape itself says the ball is in
+  /// the user's court, which is the opposite of what folding says (ADR-0018).
+  private var isIdle: Bool { session.state == .idle && !session.isUnread }
 
   /// Height of the detail block when open, stated rather than measured so that
   /// closing it is an interpolation between two numbers. A natural height
@@ -116,7 +119,7 @@ struct SessionCardView: View {
   private var header: some View {
     HStack(alignment: .center, spacing: metrics.cardSpacing * 0.7) {
       Circle()
-        .fill(Palette.statusColor(session.state))
+        .fill(session.isUnread ? Palette.statusUnread : Palette.statusColor(session.state))
         .frame(width: metrics.caption * 0.55, height: metrics.caption * 0.55)
 
       Text(session.project)

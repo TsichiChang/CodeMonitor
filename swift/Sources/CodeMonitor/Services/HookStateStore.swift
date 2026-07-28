@@ -109,6 +109,25 @@ enum HookStateStore {
     UserDefaults.standard.synchronize()
   }
 
+  // MARK: - Visits
+
+  private static let visitsKey = "visitedSessions"
+
+  /// When each session was last jumped to. Paired with its last activity this
+  /// is the whole of "have I seen this yet" — nothing stores a read flag, so
+  /// nothing can leave one set after the session speaks again (ADR-0012).
+  static func loadVisits() -> [String: Date] {
+    let stored = UserDefaults.standard.dictionary(forKey: visitsKey) ?? [:]
+    return stored.compactMapValues { value in
+      (value as? Double).map { Date(timeIntervalSince1970: $0) }
+    }
+  }
+
+  static func saveVisits(_ visits: [String: Date]) {
+    UserDefaults.standard.set(visits.mapValues(\.timeIntervalSince1970), forKey: visitsKey)
+    UserDefaults.standard.synchronize()
+  }
+
   private struct Payload: Decodable {
     let tool: String
     let sessionId: String

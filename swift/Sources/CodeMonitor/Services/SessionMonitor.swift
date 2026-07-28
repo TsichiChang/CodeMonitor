@@ -163,8 +163,31 @@ final class SessionMonitor {
 
     var fresh = applyDismissals(to: await scanner.scan())
     markTurnStarts(in: &fresh)
+    markUnread(in: &fresh)
+    // Sorted again: the scanner ordered these before anything knew what had
+    // been read, and unread is a band of its own.
+    fresh.sessions.sort(by: SessionInfo.inAttentionOrder)
     snapshot = fresh
     band.update(with: snapshot, enabled: ambientBandEnabled)
+  }
+
+  /// Flags idle sessions that have acted since they were last visited.
+  ///
+  /// Visits to sessions that no longer exist are dropped here rather than on a
+  /// timer: the map is only meaningful against sessions currently on screen,
+  /// and letting it grow forever would be a store of its own.
+  private func markUnread(in snapshot: inout SessionSnapshot) {
+    var live: [String: Date] = [:]
+    for index in snapshot.sessions.indices {
+      let session = snapshot.sessions[index]
+      if let visited = visits[session.id] { live[session.id] = visited }
+      snapshot.sessions[index].isUnread =
+        session.state == .idle && session.lastActivity > (visits[session.id] ?? .distantPast)
+    }
+    if live.count != visits.count {
+      visits = live
+      HookStateStore.saveVisits(visits)
+    }
   }
 
   // MARK: - Turn starts
@@ -220,6 +243,10 @@ final class SessionMonitor {
   /// did. Persisted, so closing one survives a relaunch.
   @ObservationIgnored
   private var dismissed: [String: Date] = HookStateStore.loadDismissals()
+
+  /// When each session was last jumped to, for deciding what is still unread.
+  @ObservationIgnored
+  private var visits: [String: Date] = HookStateStore.loadVisits()
 
   /// Hides a session until it does something new.
   ///
@@ -282,6 +309,15 @@ final class SessionMonitor {
     focusing = session.id
     focusError = nil
     defer { focusing = nil }
+
+    // Going there is what counts as reading it. Recorded before the jump is
+    // attempted: the intent to look is what the mark is about, and a jump that
+    // lands in the wrong tab still means the user went looking.
+    visits[session.id] = Date()
+    HookStateStore.saveVisits(visits)
+    if let index = snapshot.sessions.firstIndex(where: { $0.id == session.id }) {
+      snapshot.sessions[index].isUnread = false
+    }
 
     var pid = session.pid
     var tty = session.tty

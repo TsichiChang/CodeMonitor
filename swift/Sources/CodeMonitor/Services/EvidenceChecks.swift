@@ -177,6 +177,14 @@ enum EvidenceChecks {
       freshFirst.sorted(by: SessionInfo.inAttentionOrder).map(\.project)
         == staleFirst.sorted(by: SessionInfo.inAttentionOrder).map(\.project))
 
+    var unread = session("idle-unread", .idle, agoSeconds: 1200)
+    unread.isUnread = true
+    let banded = ([unread] + [session("idle-seen", .idle, agoSeconds: 60)])
+      .sorted(by: SessionInfo.inAttentionOrder)
+    check(
+      "unseen idle outranks idle already read, however old",
+      banded.map(\.project) == ["idle-unread", "idle-seen"])
+
     let mixed = [session("idle-old", .idle, agoSeconds: 600),
                  session("running", .running, agoSeconds: 300),
                  session("waiting-new", .waiting, agoSeconds: 10),

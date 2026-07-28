@@ -40,6 +40,13 @@ enum Palette {
   static let statusRunning = Color(hex: 0x34C759)
   static let statusWaiting = Color(hex: 0xF5A623)
 
+  /// Finished, and not yet looked at. A fourth colour is safe because it does
+  /// not name a state: green, amber and grey have those three between them, and
+  /// this only ever appears on an idle session, where the state colour is the
+  /// grey it replaces. It says whose turn it is, not what the agent is doing —
+  /// and blue for unread is what every mail client has already taught.
+  static let statusUnread = Color(hex: 0x3B82F6)
+
   static func resting(_ scheme: ColorScheme) -> Color {
     scheme == .dark ? controlSubtleDark : controlSubtleLight
   }
