@@ -142,7 +142,16 @@ actor SessionScanner {
       for index in sessions.indices { sessions[index].evidence.liveness = .unknown }
       return
     }
-    for index in sessions.indices { sessions[index].evidence.liveness = .absent }
+    // Absent is a claim, and it is only earned where a process could have been
+    // found. A session hosted by a desktop app has none to find: that app's
+    // processes sit at `/` and belong to the app, not to any one session, so a
+    // scan that finds nothing has observed nothing about it. `unknown` is the
+    // honest reading, and it is what keeps such a session listed instead of
+    // expiring five minutes into a long turn (ADR-0012, ADR-0017).
+    for index in sessions.indices {
+      sessions[index].evidence.liveness =
+        sessions[index].hostBundleID == nil ? .absent : .unknown
+    }
 
     // A pid a hook named is checked directly — no guessing needed, and no other
     // session may then claim it.

@@ -77,8 +77,19 @@ enum TerminalFocus {
   // MARK: - Entry point
 
   static func focus(
-    pid: Int32?, ttyHint: String?, cwd: String, tabID: String? = nil, paneID: String? = nil
+    pid: Int32?, ttyHint: String?, cwd: String, tabID: String? = nil, paneID: String? = nil,
+    hostBundleID: String? = nil
   ) async -> FocusResult {
+    // A desktop host is addressed directly, and first. There is no pid worth
+    // resolving — that app's processes are not the session's — and no tty to
+    // probe, so every step below would fail on its way to this same answer.
+    // What it cannot do is single out one session *inside* the app: there is no
+    // tab or pane to name, so this brings the window forward and stops
+    // (ADR-0017).
+    if let hostBundleID {
+      return await activate(bundleID: hostBundleID) ? .ok : .activateFailed
+    }
+
     // A hook-recorded location is the only exact answer available for Otty, so
     // it is tried before anything else — including before a pid, which this
     // path does not need.

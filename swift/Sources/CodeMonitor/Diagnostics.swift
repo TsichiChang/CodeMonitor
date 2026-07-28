@@ -75,8 +75,9 @@ enum Diagnostics {
     case "--selftest":
       print("Evidence derivation")
       let failures = EvidenceChecks.run() + EvidenceChecks.runOrderingChecks()
+        + EvidenceChecks.runProcessChecks() + EvidenceChecks.runHostChecks()
         + Metrics.runChecks()
-      let total = EvidenceChecks.count + 2 + Metrics.checks.count
+      let total = EvidenceChecks.count + 2 + 8 + 5 + Metrics.checks.count
       print(failures == 0 ? "\nall \(total) checks pass" : "\n\(failures) FAILED")
       exit(failures == 0 ? 0 : 1)
     default:

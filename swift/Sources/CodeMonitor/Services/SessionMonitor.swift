@@ -302,7 +302,8 @@ final class SessionMonitor {
     // agent around (ADR-0009).
     let result = await TerminalFocus.focus(
       pid: pid, ttyHint: tty, cwd: session.projectPath,
-      tabID: session.tabID, paneID: session.paneID)
+      tabID: session.tabID, paneID: session.paneID,
+      hostBundleID: session.hostBundleID)
     if !result.isOK { focusError = result.message }
     return result
   }

@@ -189,6 +189,65 @@ enum EvidenceChecks {
     return failures
   }
 
+  /// A process is what it *is*, not what it was asked to operate on. Every
+  /// negative here was a card that appeared on screen (ADR-0016).
+  static func runProcessChecks() -> Int {
+    let cases: [(name: String, command: String, expected: ToolKind?)] = [
+      ("a bare agent", "claude", .claude),
+      ("an agent with arguments", "/Users/x/.local/bin/claude --resume abc", .claude),
+      ("an agent run as a script", "node /opt/claude-code/cli.js --print", .claude),
+      ("codex", "/opt/homebrew/bin/codex", .codex),
+      ("opencode", "opencode run", .opencode),
+      ("a shell that merely mentions one", "zsh -c sleep 9; ls /tmp/claude ", nil),
+      ("a grep over the agent's own directory", "grep -r foo /Users/x/.claude/projects", nil),
+      ("this app's own diagnostics", "/Applications/Code Monitor.app/… --focus claude", nil),
+    ]
+
+    var failures = 0
+    for testCase in cases {
+      let actual = ProcessScanner.tool(forCommand: testCase.command)
+      if actual == testCase.expected {
+        print("  ✓ \(testCase.name)")
+      } else {
+        failures += 1
+        print("  ✗ \(testCase.name): expected \(testCase.expected?.rawValue ?? "none"), "
+          + "got \(actual?.rawValue ?? "none")")
+      }
+    }
+    return failures
+  }
+
+  /// A session hosted by a desktop app has no process to find, so a scan that
+  /// finds none has observed nothing — and `unknown` is what keeps it listed
+  /// through a long turn instead of expiring at five minutes (ADR-0017).
+  static func runHostChecks() -> Int {
+    var failures = 0
+    func check(_ name: String, _ passed: Bool) {
+      if passed { print("  ✓ \(name)") } else { failures += 1; print("  ✗ \(name)") }
+    }
+
+    check(
+      "Codex Desktop is a desktop host",
+      CodexSource.hostBundleID(for: "Codex Desktop") == "com.openai.codex")
+    check(
+      "a CLI session has no desktop host",
+      CodexSource.hostBundleID(for: "codex_cli_rs") == nil)
+    check("a session with no originator has none", CodexSource.hostBundleID(for: nil) == nil)
+
+    // The lifetime consequence, which is the whole reason the field exists.
+    let desktop = Evidence(.turnInFlight, at: .distantPast, source: .inferred, liveness: .unknown)
+    let terminal = Evidence(.turnInFlight, at: .distantPast, source: .inferred, liveness: .absent)
+    let now = Date()
+    var aged = desktop
+    aged.at = now.addingTimeInterval(-10 * 60)
+    var agedTerminal = terminal
+    agedTerminal.at = now.addingTimeInterval(-10 * 60)
+    check("a desktop session survives a ten-minute turn", aged.isCurrent(now: now))
+    check("a terminal session with no process does not", !agedTerminal.isCurrent(now: now))
+
+    return failures
+  }
+
   /// Runs the tables. Returns the number of failures.
   static func run() -> Int {
     let now = Date()

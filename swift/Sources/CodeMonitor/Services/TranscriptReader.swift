@@ -41,6 +41,9 @@ struct CodexMeta: Sendable {
   var id: String?
   var model: String?
   var gitBranch: String?
+  /// What launched the session — `Codex Desktop`, a CLI, an editor extension.
+  /// The one field that says whether a process will ever back this session.
+  var originator: String?
 }
 
 // MARK: - Reader
@@ -189,17 +192,58 @@ enum TranscriptReader {
     return entry
   }
 
+  /// Codex's `session_meta` cannot be parsed as JSON from a head window, so its
+  /// fields are lifted out textually.
+  ///
+  /// The record carries the agent's entire system prompt in
+  /// `base_instructions` — 43 KB in the largest one here, p50 14 KB — against a
+  /// 16 KB head. Every larger session therefore produced a truncated object,
+  /// `JSONSerialization` refused all of it, and the session lost its cwd: that
+  /// is why Codex sessions all showed up as "Codex session" with no project.
+  ///
+  /// Everything needed sits in the first 400 bytes, before that field starts.
+  /// `git` and `model` do not — they follow the prompt — so a Codex session
+  /// shows no branch. Reading 43 KB per session per scan to recover a subtitle
+  /// is not a trade worth making; the project name is identity, a branch is
+  /// decoration.
   static func parseCodexMeta(_ text: String) -> CodexMeta? {
-    guard let raw = firstJSONObject(in: text) else { return nil }
-    let payload = dict(raw["payload"])
-    let git = dict(payload["git"])
+    // Everything past the prompt is arbitrary text that can contain anything
+    // shaped like a field, including the words this scans for.
+    let head =
+      text.range(of: "\"base_instructions\"")
+      .map { String(text[text.startIndex..<$0.lowerBound]) } ?? text
 
+    guard let cwd = quotedField("cwd", in: head) else { return nil }
     return CodexMeta(
-      cwd: str(payload["cwd"]),
-      id: str(payload["id"]),
-      model: str(payload["model"]) ?? str(payload["model_provider"]),
-      gitBranch: str(git["branch"])
+      cwd: cwd,
+      id: quotedField("id", in: head),
+      model: quotedField("model_provider", in: head),
+      // Present in the record, unreachable at this cost. See above.
+      gitBranch: nil,
+      originator: quotedField("originator", in: head)
     )
+  }
+
+  /// Value of `"name": "…"`, scanned rather than parsed.
+  private static func quotedField(_ name: String, in text: String) -> String? {
+    guard let key = text.range(of: "\"\(name)\"") else { return nil }
+    var index = key.upperBound
+    while index < text.endIndex, text[index] == " " || text[index] == ":" {
+      index = text.index(after: index)
+    }
+    guard index < text.endIndex, text[index] == "\"" else { return nil }
+    index = text.index(after: index)
+
+    var value = ""
+    while index < text.endIndex, text[index] != "\"" {
+      if text[index] == "\\" {
+        index = text.index(after: index)
+        guard index < text.endIndex else { break }
+      }
+      value.append(text[index])
+      index = text.index(after: index)
+    }
+    return value.isEmpty ? nil : value
   }
 
   // MARK: - JSONL helpers

@@ -97,6 +97,16 @@ struct SessionInfo: Identifiable, Sendable, Hashable {
   /// Pane within that tab. A tab can hold several sessions side by side, so
   /// this is what actually distinguishes them.
   var paneID: String?
+  /// Set when the session runs inside a desktop app rather than a terminal, to
+  /// that app's bundle identifier.
+  ///
+  /// Two things follow from it, and both are corrections to an assumption this
+  /// app was built on — that a session is backed by a findable process. A
+  /// desktop host's processes sit at `/` and belong to the app, not the
+  /// session, so their absence proves nothing and their presence identifies
+  /// nothing. Jumping therefore means activating the app, and liveness has to
+  /// stay `unknown` rather than decay to `absent` (ADR-0017).
+  var hostBundleID: String?
   /// Started by a program rather than a person — an SDK-spawned agent doing a
   /// piece of someone else's task, not a session anybody is sitting in front of.
   var isDelegated = false

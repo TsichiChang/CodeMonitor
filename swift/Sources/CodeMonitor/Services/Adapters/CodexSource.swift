@@ -63,8 +63,23 @@ final class CodexSource: SessionSource {
       model: meta?.model,
       evidence: Evidence(Self.activity(entry), at: mtime, source: .inferred),
       state: .idle,
+      hostBundleID: Self.hostBundleID(for: meta?.originator),
       lastMessage: entry?.snippet
     )
+  }
+
+  /// The desktop app a session belongs to, or nil when a terminal runs it.
+  ///
+  /// `originator` is the only field that tells them apart, and the difference
+  /// is not cosmetic: a desktop session has no process to find. Every Codex
+  /// process on this machine belongs to the app itself and sits at `/`, so
+  /// their absence proves nothing about any one session and their presence
+  /// identifies none — which is why liveness has to stay `unknown` for these,
+  /// and why jumping means activating the app (ADR-0017).
+  static func hostBundleID(for originator: String?) -> String? {
+    guard let key = originator?.lowercased() else { return nil }
+    let desktopHosts = ["codex desktop": "com.openai.codex", "chatgpt": "com.openai.codex"]
+    return desktopHosts.first { key.contains($0.key) }?.value
   }
 
   private static func activity(_ entry: CodexEntry?) -> Activity {
