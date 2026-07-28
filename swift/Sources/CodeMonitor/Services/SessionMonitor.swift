@@ -143,8 +143,57 @@ final class SessionMonitor {
   }
 
   func refresh() async {
-    snapshot = applyDismissals(to: await scanner.scan())
+    var fresh = applyDismissals(to: await scanner.scan())
+    markTurnStarts(in: &fresh)
+    snapshot = fresh
     band.update(with: snapshot, enabled: ambientBandEnabled)
+  }
+
+  // MARK: - Turn starts
+
+  /// When each in-flight turn began, for the sessions currently running one.
+  ///
+  /// Kept here rather than derived from evidence because it cannot be: a
+  /// running session's transcript says when it last wrote, and reaching back
+  /// to the start of the turn means reading a third of a megabyte per session
+  /// per scan — measured at p50 296 KB against a 64 KB tail window.
+  ///
+  /// This does not reintroduce what ADR-0012 removed. State is still derived
+  /// from evidence on every scan and never from its own previous value; this
+  /// map is read only by the label on a card, so a wrong entry shows one
+  /// wrong number and cannot spread into a state, a lifetime or a poll rate.
+  @ObservationIgnored private var turnStarts: [String: Date] = [:]
+
+  /// A turn starts when a session begins running and ends when it goes idle.
+  ///
+  /// Waiting deliberately keeps the existing start: approving a permission
+  /// prompt resumes the same turn, and the time spent waiting on you is part
+  /// of how long the task has taken. Only `idle → running` opens a new one.
+  private func markTurnStarts(in snapshot: inout SessionSnapshot) {
+    let now = Date()
+    var live: Set<String> = []
+
+    for index in snapshot.sessions.indices {
+      let session = snapshot.sessions[index]
+      live.insert(session.id)
+
+      switch session.state {
+      case .running:
+        // Absent means the previous state was idle, or this is the first sight
+        // of the session — a relaunch mid-task therefore starts counting from
+        // now, understating rather than inventing a duration.
+        let start = turnStarts[session.id] ?? now
+        turnStarts[session.id] = start
+        snapshot.sessions[index].stateSince = start
+      case .waiting:
+        snapshot.sessions[index].stateSince = session.lastActivity
+      case .idle:
+        turnStarts.removeValue(forKey: session.id)
+        snapshot.sessions[index].stateSince = session.lastActivity
+      }
+    }
+
+    turnStarts = turnStarts.filter { live.contains($0.key) }
   }
 
   // MARK: - Dismissal

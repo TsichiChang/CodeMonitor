@@ -93,6 +93,25 @@ struct SessionCardView: View {
     }
   }
 
+  /// How long the current state has been going — running, waiting or idle.
+  ///
+  /// One meaning across all three, because the old one was only accidentally
+  /// right: "time since the last write" happens to equal "time in this state"
+  /// for waiting and idle, since neither writes anything once it begins. A
+  /// running session writes on every tool call, so the same number read as
+  /// `2s` for a job ten minutes in — and it was read, correctly, as the state
+  /// duration it looked like.
+  private func elapsed(at now: Date) -> String {
+    Self.relativeTime(session.stateSince ?? session.lastActivity, now: now)
+  }
+
+  /// How often the age re-reads the clock. Five seconds is finer than any
+  /// number it displays — the smallest unit shown is a second, and below a
+  /// minute a five-second step is not something a glance resolves — while
+  /// staying far cheaper than a per-second redraw on a display where motion is
+  /// the expensive thing (ADR-0006).
+  private static let tick: TimeInterval = 5
+
   /// Present in both shapes, so nothing about it moves when the tile folds.
   private var header: some View {
     HStack(alignment: .center, spacing: metrics.cardSpacing * 0.7) {
@@ -115,10 +134,17 @@ struct SessionCardView: View {
 
       Spacer(minLength: metrics.cardSpacing * 0.5)
 
-      Text(Self.relativeTime(session.lastActivity))
-        .font(.system(size: metrics.caption))
-        .monospacedDigit()
-        .foregroundStyle(.tertiary)
+      // Driven by a clock, not by the scan. An idle session's `SessionInfo` is
+      // identical between scans, so SwiftUI rightly skips re-evaluating this
+      // card — and `Date()` lives inside that evaluation, which left the age
+      // frozen at whatever it read when the session went quiet. Only the label
+      // is inside the timeline, so nothing else redraws on the tick.
+      TimelineView(.periodic(from: .now, by: Self.tick)) { context in
+        Text(elapsed(at: context.date))
+          .font(.system(size: metrics.caption))
+          .monospacedDigit()
+          .foregroundStyle(.tertiary)
+      }
         // The close button is an overlay in this corner; its width is reserved
         // whether or not it shows, so the time never jumps sideways on hover.
         .padding(.trailing, onDismiss == nil ? 0 : metrics.body * 0.9)
@@ -187,8 +213,8 @@ struct SessionCardView: View {
     return short
   }
 
-  static func relativeTime(_ date: Date) -> String {
-    let seconds = max(0, Int(Date().timeIntervalSince(date).rounded()))
+  static func relativeTime(_ date: Date, now: Date = Date()) -> String {
+    let seconds = max(0, Int(now.timeIntervalSince(date).rounded()))
     if seconds < 60 { return "\(seconds)s" }
     let minutes = Int((Double(seconds) / 60).rounded())
     if minutes < 60 { return "\(minutes)m" }
@@ -205,33 +231,50 @@ private struct BreathingBackground: ViewModifier {
   let scheme: ColorScheme
 
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
-  @State private var lit = false
+
+  /// Redraw rate of the tint. The breath itself is seconds long, so this only
+  /// has to be fine enough that the fade reads as continuous.
+  private static let fps = 30.0
 
   func body(content: Content) -> some View {
     let breath = Palette.breath(for: session.state, scheme: scheme)
     // A guessed block does not get to pulse. Reported `waiting` means Claude
     // Code fired `PermissionRequest`; inferred means a tool call has been quiet
     // for 45 seconds, and that guess has been wrong (ADR-0012).
-    let animates = session.deservesAttention
+    let animates = breath != nil && session.deservesAttention && !reduceMotion
+
     content.background {
-      if let breath, animates, !reduceMotion {
-        Rectangle()
-          .fill(lit ? breath.to : breath.from)
-          // Scoped to `lit`, deliberately. `PhaseAnimator` was doing this job
-          // and its animation applied to everything the redraw touched — so
-          // resizing the window animated the card backgrounds' *frames* too,
-          // and each one visibly swept out to its new width. Keying the
-          // animation to the one value that should animate leaves layout alone.
-          //
-          // The token period covers a full cycle; one phase is half of it.
-          .animation(
-            .easeInOut(duration: breath.period / 2).repeatForever(autoreverses: true),
-            value: lit
-          )
-          .onAppear { lit = true }
+      if let breath, animates {
+        // Phase is read off the wall clock rather than held in state, which is
+        // what puts every card of the same state in step: two running sessions
+        // brighten and dim together instead of each starting its own cycle
+        // whenever it happened to appear. Several cards breathing as one is a
+        // single signal; the same cards out of phase are several, on a display
+        // whose scarcest resource is motion (ADR-0006).
+        //
+        // It also removes a whole class of defect. The previous version drove
+        // this from a `lit` flag toggled on appearance, and a session that went
+        // idle and came back found the flag already true — no change for the
+        // repeating animation to react to, so that card silently stopped
+        // breathing. A phase computed from time cannot get stuck.
+        TimelineView(.periodic(from: .now, by: 1 / Self.fps)) { context in
+          Rectangle().fill(tint(breath, at: context.date))
+        }
       } else {
+        // Breathes but may not — an inferred block — rests at the lit end, so
+        // it still reads as amber without demanding attention (ADR-0012).
         Rectangle().fill(breath?.to ?? Palette.resting(scheme))
       }
     }
+  }
+
+  private func tint(_ breath: (from: Color, to: Color, period: Double), at now: Date)
+    -> Color
+  {
+    // Absolute time, so the cycle is anchored to the same origin for everyone.
+    let turns = now.timeIntervalSinceReferenceDate / breath.period
+    let wave = (1 - cos(2 * .pi * turns)) / 2  // 0…1, smooth at both ends
+    let from = NSColor(breath.from), to = NSColor(breath.to)
+    return Color(from.blended(withFraction: wave, of: to) ?? to)
   }
 }

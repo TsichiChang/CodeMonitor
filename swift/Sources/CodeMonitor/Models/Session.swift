@@ -105,6 +105,21 @@ struct SessionInfo: Identifiable, Sendable, Hashable {
   /// When this session was last observed doing anything.
   var lastActivity: Date { evidence.at }
 
+  /// When the thing the card reports began — what "5m" on a tile counts from.
+  ///
+  /// For `waiting` and `idle` this is just `lastActivity`: nothing writes once
+  /// a session is blocked or finished, so the last write *is* the moment the
+  /// state began. `running` is the exception, and the one that misled — a
+  /// running session writes on every tool call, so its last write says "there
+  /// was activity two seconds ago", never "this has been running two seconds".
+  /// It is filled in with the start of the current turn instead.
+  var stateSince: Date?
+
+  /// How long the card's state has been going, in seconds.
+  func age(at now: Date) -> TimeInterval {
+    now.timeIntervalSince(stateSince ?? lastActivity)
+  }
+
   /// The order sessions are shown in, and the order the jump shortcut walks
   /// through. One rule, so what you see and what a keypress does agree.
   ///
