@@ -55,6 +55,15 @@ actor SessionScanner {
   ///
   /// A hook also knows things no amount of scanning can recover: the pane its
   /// session lives in, and its pid without a directory guess.
+  /// How far behind a hook's timestamp may be and still count as current.
+  ///
+  /// The hook script stamps whole seconds (`date +%s`) while a transcript's
+  /// mtime is sub-second, so a hook that fired *after* a write can still read
+  /// as up to a second earlier. Without this slack the ordinary case — a tool
+  /// call writing to the transcript and firing `PostToolUse` — would flip a
+  /// coin between the two sources.
+  private static let hookClockSlack: TimeInterval = 2
+
   private func applyReports(to sessions: inout [SessionInfo]) {
     let reported = HookStateStore.states()
     guard !reported.isEmpty else { return }
@@ -62,13 +71,34 @@ actor SessionScanner {
     var unclaimed = reported
     for index in sessions.indices {
       guard let hook = unclaimed.removeValue(forKey: sessions[index].id) else { continue }
-      sessions[index].evidence = Evidence(
-        hook.activity,
-        // A hook fires on events a transcript write does not always follow, so
-        // its timestamp can be the fresher of the two.
-        at: max(sessions[index].evidence.at, hook.updated),
-        source: .reported
-      )
+
+      // The hook wins unless the transcript is both later *and* saying
+      // something.
+      //
+      // A hook fires on events no transcript write follows, so it is usually
+      // the fresher of the two. But not always, and that exception was a
+      // defect: pressing Esc writes `[Request interrupted by user]` into the
+      // transcript and fires no hook at all — not even `StopFailure`. The
+      // hook's last word stays `PreToolUse`, and a *reported* turnInFlight
+      // never decays, so an interrupted session claimed to be running for as
+      // long as its process lived. Taking the hook's activity while taking the
+      // transcript's newer timestamp was the worst of both: it dated a stale
+      // event to the moment of a write that contradicted it.
+      //
+      // "Saying something" is the other half, and going without it was its own
+      // defect. A transcript is also written by things that are not turns at
+      // all — a slash command, `! nvim`, an injected reminder — and those read
+      // as `unknown`. Letting a later `unknown` displace a hook's `Stop` threw
+      // away the one source that actually knew the turn had ended.
+      let inferred = sessions[index].evidence
+      let transcriptIsLater =
+        inferred.activity != .unknown
+        && inferred.at > hook.updated.addingTimeInterval(Self.hookClockSlack)
+      if !transcriptIsLater {
+        sessions[index].evidence = Evidence(
+          hook.activity, at: max(inferred.at, hook.updated), source: .reported)
+      }
+
       sessions[index].tabID = hook.tabID
       sessions[index].paneID = hook.paneID
       if let tty = hook.tty { sessions[index].tty = tty }

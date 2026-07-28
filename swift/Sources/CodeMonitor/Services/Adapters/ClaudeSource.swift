@@ -100,6 +100,10 @@ final class ClaudeSource: SessionSource {
       // inferred turn is read as a suspected block — so an interrupted session
       // spent ten minutes claiming to want approval for something.
       if entry.interrupted { return .turnComplete }
+      // A slash command, a `!` shell command, or an injected reminder. Written
+      // as the user, typed by nobody, and answered by nobody — so it says
+      // nothing about whose turn it is.
+      if entry.synthetic { return .unknown }
       // A prompt or a tool result just landed; the model owns the next turn.
       return .turnInFlight
     default:

@@ -20,6 +20,9 @@ struct ClaudeEntry: Sendable {
   /// The user took the turn back — Claude Code's own marker for Esc, written as
   /// a user record even though no prompt was submitted.
   var interrupted = false
+  /// A user record that no person typed: a slash command, a `!` shell command,
+  /// its output, or an injected reminder. Says nothing about whose turn it is.
+  var synthetic = false
   var cwd: String?
   var gitBranch: String?
   var model: String?
@@ -102,6 +105,7 @@ enum TranscriptReader {
     entry.stopReason = str(message["stop_reason"])
     entry.hasToolUse = content.contains { str(dict($0)["type"]) == "tool_use" }
     entry.interrupted = isInterrupt(message: message, content: content)
+    entry.synthetic = isSynthetic(message: message, content: content)
     entry.entrypoint = str(raw["entrypoint"])
     entry.cwd = str(raw["cwd"])
     entry.gitBranch = str(raw["gitBranch"])
@@ -124,6 +128,28 @@ enum TranscriptReader {
     return content.contains { block in
       str(dict(block)["text"])?.hasPrefix(marker) == true
     }
+  }
+
+  /// Records Claude Code writes as the user without a user having written them.
+  ///
+  /// Running `! nvim` or a slash command puts one of these in the transcript,
+  /// and the caveat spells out what it is — "DO NOT respond to these messages".
+  /// Read as an ordinary prompt they claim the model just took the turn, which
+  /// is the opposite of what they mean, and a turn that then goes quiet gets
+  /// read as a suspected block. They carry no claim about whose turn it is, so
+  /// the honest reading is `unknown`.
+  private static let syntheticMarkers = [
+    "<local-command-", "<command-name>", "<command-message>", "<command-args>",
+    "<bash-input>", "<bash-stdout>", "<bash-stderr>", "<system-reminder>",
+  ]
+
+  private static func isSynthetic(message: [String: Any], content: [Any]) -> Bool {
+    func marked(_ text: String?) -> Bool {
+      guard let text = text?.trimmingCharacters(in: .whitespacesAndNewlines) else { return false }
+      return syntheticMarkers.contains { text.hasPrefix($0) }
+    }
+    if marked(str(message["content"])) { return true }
+    return content.contains { marked(str(dict($0)["text"])) }
   }
 
   private static func claudeSnippet(message: [String: Any], content: [Any]) -> String? {
