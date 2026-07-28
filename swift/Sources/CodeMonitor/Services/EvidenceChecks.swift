@@ -192,20 +192,30 @@ enum EvidenceChecks {
   /// A process is what it *is*, not what it was asked to operate on. Every
   /// negative here was a card that appeared on screen (ADR-0016).
   static func runProcessChecks() -> Int {
-    let cases: [(name: String, command: String, expected: ToolKind?)] = [
-      ("a bare agent", "claude", .claude),
-      ("an agent with arguments", "/Users/x/.local/bin/claude --resume abc", .claude),
-      ("an agent run as a script", "node /opt/claude-code/cli.js --print", .claude),
-      ("codex", "/opt/homebrew/bin/codex", .codex),
-      ("opencode", "opencode run", .opencode),
-      ("a shell that merely mentions one", "zsh -c sleep 9; ls /tmp/claude ", nil),
-      ("a grep over the agent's own directory", "grep -r foo /Users/x/.claude/projects", nil),
-      ("this app's own diagnostics", "/Applications/Code Monitor.app/… --focus claude", nil),
+    // Real argument vectors, because that is what the scanner sees. The one
+    // with spaces in its path is the regression that made this matter: split on
+    // spaces, its argv[0] became `/Users/x/Library/Application` and Claude
+    // Desktop stopped being recognised at all.
+    let cases: [(name: String, argv: [String], expected: ToolKind?)] = [
+      ("a bare agent", ["claude"], .claude),
+      ("an agent with arguments", ["/Users/x/.local/bin/claude", "--resume", "abc"], .claude),
+      ("an agent run as a script", ["node", "/opt/claude-code/cli.js", "--print"], .claude),
+      (
+        "an executable path containing spaces",
+        ["/Users/x/Library/Application Support/Claude/claude-code/2.1/claude.app/Contents/MacOS/claude",
+         "--output-format", "stream-json"],
+        .claude
+      ),
+      ("codex", ["/opt/homebrew/bin/codex"], .codex),
+      ("opencode", ["opencode", "run"], .opencode),
+      ("a shell that merely mentions one", ["zsh", "-c", "sleep 9; ls /tmp/claude "], nil),
+      ("a grep over the agent's own directory", ["grep", "-r", "/Users/x/.claude/projects"], nil),
+      ("this app's own diagnostics", ["/Applications/Code Monitor.app/…", "--focus", "claude"], nil),
     ]
 
     var failures = 0
     for testCase in cases {
-      let actual = ProcessScanner.tool(forCommand: testCase.command)
+      let actual = ProcessScanner.tool(forArguments: testCase.argv)
       if actual == testCase.expected {
         print("  ✓ \(testCase.name)")
       } else {

@@ -46,24 +46,23 @@ enum ProcessScanner {
   /// later. Matching stops after these two positions either way.
   private static let interpreters = ["node", "bun", "deno", "python", "python3", "sh", "zsh", "bash"]
 
-  /// The part of a command line allowed to identify a tool: the executable, and
-  /// the script after it when the executable is an interpreter.
+  /// The part of an argument vector allowed to identify a tool: the executable,
+  /// and the script after it when the executable is an interpreter.
   ///
-  /// Arguments are excluded, and that is the whole point. Tested against the
-  /// full line, any process merely *mentioning* an agent became one — Claude
+  /// The rest is excluded, and that is the whole point. Tested against the
+  /// whole line, any process merely *mentioning* an agent became one — Claude
   /// Code's own Bash tool spawns a shell per command, in the session's current
   /// directory, so `ls /tmp/claude` in this repo minted a card titled `swift`
   /// that lived as long as the command (ADR-0016).
-  static func identifyingPrefix(of command: String) -> String {
-    let words = command.split(separator: " ", maxSplits: 2, omittingEmptySubsequences: true)
-    guard let first = words.first else { return command }
-    let name = first.split(separator: "/").last.map(String.init) ?? String(first)
-    guard interpreters.contains(name), words.count > 1 else { return String(first) }
-    return "\(first) \(words[1])"
+  static func identifyingPrefix(of arguments: [String]) -> String {
+    guard let first = arguments.first else { return "" }
+    let name = first.split(separator: "/").last.map(String.init) ?? first
+    guard interpreters.contains(name), arguments.count > 1 else { return first }
+    return "\(first) \(arguments[1])"
   }
 
-  static func tool(forCommand fullCommand: String) -> ToolKind? {
-    let command = identifyingPrefix(of: fullCommand)
+  static func tool(forArguments arguments: [String]) -> ToolKind? {
+    let command = identifyingPrefix(of: arguments)
     // Reject on a literal substring first: almost no process mentions any of
     // these, and `.regularExpression` recompiles its pattern on every call.
     //
@@ -94,7 +93,7 @@ enum ProcessScanner {
       // costs more than the `ps`/`lsof` calls this replaced — a few hundred
       // readable processes with dozens of variables each — and the environment
       // is wanted for exactly one process, at jump time.
-      guard let command = commandLine(pid), let tool = tool(forCommand: command) else { continue }
+      guard let argv = arguments(pid), let tool = tool(forArguments: argv) else { continue }
       processes.append(
         LiveProcess(
           tool: tool,
@@ -216,8 +215,19 @@ enum ProcessScanner {
 
   /// The command line of a process, or nil when it is not ours to read.
   static func commandLine(_ pid: pid_t) -> String? {
+    arguments(pid)?.joined(separator: " ")
+  }
+
+  /// The real argument vector, with its boundaries intact.
+  ///
+  /// Identification must use this rather than the joined string: an executable
+  /// path may contain spaces, and Claude Desktop's does —
+  /// `…/Library/Application Support/Claude/…/claude`. Splitting the joined form
+  /// on spaces cut `argv[0]` at `…/Library/Application`, and the session
+  /// stopped being recognised at all.
+  static func arguments(_ pid: pid_t) -> [String]? {
     guard let strings = processStrings(pid, stoppingAfterArguments: true) else { return nil }
-    return strings.values.prefix(strings.argc).joined(separator: " ")
+    return Array(strings.values.prefix(strings.argc))
   }
 
   private struct ProcStrings {
