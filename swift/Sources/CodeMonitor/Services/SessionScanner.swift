@@ -26,6 +26,15 @@ actor SessionScanner {
     sessions += unmatchedProcesses(processes, sessions: sessions, scanSucceeded: scanOK)
     sessions = foldDelegated(sessions)
 
+    // A prompt that has since been answered. Checked only for sessions actually
+    // showing as blocked — one `proc_listchildpids` each, and there is rarely
+    // more than one (ADR-0019).
+    for index in sessions.indices where sessions[index].evidence.activity == .blockedOnUser {
+      guard let pid = sessions[index].pid else { continue }
+      sessions[index].evidence = sessions[index].evidence.resolvingGrant(
+        newestChildStart: ProcessScanner.newestChildStart(of: pid))
+    }
+
     // The single derivation. Nothing above this line decides a state, and
     // nothing below it changes evidence.
     for index in sessions.indices {

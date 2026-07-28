@@ -85,8 +85,9 @@ enum Diagnostics {
       print("Evidence derivation")
       let failures = EvidenceChecks.run() + EvidenceChecks.runOrderingChecks()
         + EvidenceChecks.runProcessChecks() + EvidenceChecks.runHostChecks()
+        + EvidenceChecks.runGrantChecks()
         + Metrics.runChecks()
-      let total = EvidenceChecks.count + 2 + 9 + 5 + Metrics.checks.count
+      let total = EvidenceChecks.count + 3 + 9 + 5 + 4 + Metrics.checks.count
       print(failures == 0 ? "\nall \(total) checks pass" : "\n\(failures) FAILED")
       exit(failures == 0 ? 0 : 1)
     default:
@@ -172,22 +173,39 @@ enum Diagnostics {
     print(count == 0 ? "Nothing was hidden." : "Restored \(count) hidden session(s).")
   }
 
+  /// Resolves a search string to exactly one session, or to none.
+  ///
+  /// An ambiguous string is refused rather than resolved. Taking the first of
+  /// several matches printed a note and carried on, which meant `--focus`
+  /// jumped to a session the user had not named — and, once jumping also marked
+  /// a session read, quietly cleared the unread mark on a different one. A
+  /// command with side effects has no business guessing which session it was
+  /// pointed at.
   private static func match(_ needle: String, in snapshot: SessionSnapshot) -> SessionInfo? {
+    // A full id is unambiguous by construction, and is what `--focus-next` and
+    // any script would pass.
+    if let exact = snapshot.sessions.first(where: { $0.id == needle }) { return exact }
+
     let lowered = needle.lowercased()
     let matches = snapshot.sessions.filter {
-      $0.id == needle
-        || $0.project.lowercased().contains(lowered)
+      $0.project.lowercased().contains(lowered)
         || $0.projectPath.lowercased().contains(lowered)
     }
-    guard let session = matches.first else {
+
+    switch matches.count {
+    case 0:
       print("No session matching \"\(needle)\".")
       print("Known: \(snapshot.sessions.map(\.project).joined(separator: ", "))")
       return nil
+    case 1:
+      return matches[0]
+    default:
+      print("\"\(needle)\" matches \(matches.count) sessions — name one exactly:")
+      for session in matches {
+        print("  \(session.id)   \(session.project)  (\(session.state.rawValue))")
+      }
+      return nil
     }
-    if matches.count > 1 {
-      print("note: \(matches.count) matched; using \"\(session.project)\" (\(session.id))")
-    }
-    return session
   }
 
   // MARK: - Commands

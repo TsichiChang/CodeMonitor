@@ -266,6 +266,34 @@ enum EvidenceChecks {
     return failures
   }
 
+  /// A permission prompt is only still a prompt until something starts running.
+  static func runGrantChecks() -> Int {
+    let now = Date()
+    let prompt = Evidence(
+      .blockedOnUser, at: now.addingTimeInterval(-60), source: .reported, liveness: .alive)
+    var failures = 0
+    func check(_ name: String, _ passed: Bool) {
+      if passed { print("  ✓ \(name)") } else { failures += 1; print("  ✗ \(name)") }
+    }
+
+    check(
+      "a prompt with nothing running is still a prompt",
+      prompt.resolvingGrant(newestChildStart: nil).activity == .blockedOnUser)
+    check(
+      "an MCP server started before the prompt proves nothing",
+      prompt.resolvingGrant(newestChildStart: now.addingTimeInterval(-600))
+        .activity == .blockedOnUser)
+    check(
+      "work started after the prompt means it was answered",
+      prompt.resolvingGrant(newestChildStart: now.addingTimeInterval(-10))
+        .activity == .turnInFlight)
+    check(
+      "a running turn is left alone",
+      Evidence(.turnInFlight, at: now, source: .reported)
+        .resolvingGrant(newestChildStart: now).activity == .turnInFlight)
+    return failures
+  }
+
   /// Runs the tables. Returns the number of failures.
   static func run() -> Int {
     let now = Date()

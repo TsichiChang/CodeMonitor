@@ -60,6 +60,35 @@ struct Evidence: Sendable, Hashable {
   }
 }
 
+extension Evidence {
+  /// Resolves a permission prompt that has since been answered.
+  ///
+  /// Claude Code fires `PermissionRequest` when the prompt appears and nothing
+  /// at all when it is granted, so the last word from any hook stays "blocked
+  /// on the user" for as long as the approved tool then takes to run. A build
+  /// read as a minute of waiting for approval that had already been given.
+  ///
+  /// The grant is unobservable; the work that follows it is not. A child
+  /// process started *after* the prompt cannot have been started by a user who
+  /// had not answered yet — so it dates the answer, and is a later observation
+  /// than the prompt it supersedes. Children that predate the prompt say
+  /// nothing: an agent keeps MCP servers alive for its whole session.
+  ///
+  /// Deliberately not a new `Activity`. "Approved and now working" is what
+  /// `turnInFlight` already means; a fourth value would have to be given a
+  /// meaning everywhere activities are read, to describe a state nothing else
+  /// distinguishes.
+  func resolvingGrant(newestChildStart: Date?) -> Evidence {
+    guard activity == .blockedOnUser, let started = newestChildStart, started > at else {
+      return self
+    }
+    var resolved = self
+    resolved.activity = .turnInFlight
+    resolved.at = started
+    return resolved
+  }
+}
+
 // MARK: - Derivation
 
 extension Evidence {

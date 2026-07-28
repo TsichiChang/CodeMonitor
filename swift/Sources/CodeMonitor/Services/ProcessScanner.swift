@@ -148,6 +148,31 @@ enum ProcessScanner {
   }
 
   /// When a process was launched.
+  /// When this process most recently started a child, if it has any.
+  ///
+  /// The one observable that says a permission prompt was answered. Claude Code
+  /// fires no event when permission is *granted* — only when it is asked for —
+  /// so between the prompt and the tool finishing, the last thing any hook said
+  /// is still "blocked on the user", and a build that takes a minute reads as a
+  /// minute of waiting (ADR-0019).
+  ///
+  /// Long-lived children are why this reports the newest start time rather than
+  /// a count: an agent keeps MCP servers running for its whole life, and they
+  /// prove nothing. A child that started *after* the prompt does.
+  static func newestChildStart(of pid: pid_t) -> Date? {
+    var children = [pid_t](repeating: 0, count: 128)
+    let bytes = children.withUnsafeMutableBufferPointer { buffer in
+      proc_listchildpids(pid, buffer.baseAddress, Int32(buffer.count * MemoryLayout<pid_t>.size))
+    }
+    guard bytes > 0 else { return nil }
+
+    let count = min(Int(bytes) / MemoryLayout<pid_t>.size, children.count)
+    return children.prefix(count)
+      .filter { $0 > 0 }
+      .compactMap { startTime(of: $0) }
+      .max()
+  }
+
   static func startTime(of pid: pid_t) -> Date? {
     var info = proc_bsdinfo()
     let size = MemoryLayout<proc_bsdinfo>.size
