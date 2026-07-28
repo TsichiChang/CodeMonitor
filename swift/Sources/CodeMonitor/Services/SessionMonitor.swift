@@ -23,6 +23,12 @@ final class SessionMonitor {
   /// and lives outside the SwiftUI graph, and this type already exists to feed
   /// the surfaces that show a snapshot.
   @ObservationIgnored private let band = AmbientBand()
+  /// Turns a hook's report into an event instead of something to poll for
+  /// (ADR-0008). It shortens no code — the timer still runs — it only removes
+  /// the wait between a hook writing and the display noticing.
+  @ObservationIgnored private let watcher = StateFileWatcher()
+  /// Guards against a watch event and a timer tick scanning at once.
+  @ObservationIgnored private var scanning = false
 
   var ambientBandEnabled: Bool {
     get { UserDefaults.standard.object(forKey: "ambientBand") as? Bool ?? true }
@@ -106,28 +112,33 @@ final class SessionMonitor {
 
   /// The gap before the next scan, chosen from what the last one found.
   ///
-  /// Only a `running` session changes on its own, so only a running session
-  /// earns the fast cadence. `idle` and `waiting` are both static until the
-  /// user does something, and polling them at full rate reflects nothing.
+  /// A `running` session changes on its own, so it earns the fast cadence: its
+  /// transcript is being written and nothing announces that.
   ///
-  /// This also keeps the one clock-driven transition sharp: a session becomes
-  /// `waiting` by *not* being touched for long enough, and it is `running`
-  /// right up until that moment — so the fast cadence is still in force when
-  /// the threshold passes. Watching the filesystem could not do this; the
-  /// signal is the absence of an event.
-  /// Waiting now earns the fast cadence too, which it did not before the
-  /// ambient band existed. Nothing about a waiting session changes on its own —
-  /// but the band is lit for as long as it waits, and the band going out is how
-  /// the user sees that their answer registered. At the quiet cadence that
-  /// confirmation trails by up to fifteen seconds, which reads as the signal
-  /// being broken rather than as polling being thrifty (ADR-0014).
+  /// A `waiting` one changes nothing on its own — but the ambient band is lit
+  /// for as long as it waits, and the band going out is how the user sees that
+  /// their answer registered; a late confirmation reads as a broken signal
+  /// rather than as thrifty polling (ADR-0014). That bought waiting the fast
+  /// cadence too, and it is what watching the state directory buys back: with a
+  /// watch the hook's next report arrives as an event instead of being waited
+  /// for (ADR-0008), so waiting can idle at the slow cadence again. Without one
+  /// it cannot, and an unwatched machine keeps the old behaviour.
+  ///
+  /// The timer does not go away either way. A session becomes `waiting` by
+  /// *not* being touched for long enough, and no filesystem reports the absence
+  /// of an event — the conclusion of ADR-0011, and why the fast cadence has to
+  /// stay in force while a running session approaches that threshold.
   private var nextDelay: TimeInterval {
-    snapshot.counts.running > 0 || snapshot.counts.waiting > 0
-      ? interval : max(interval, Self.quietInterval)
+    if snapshot.counts.running > 0 { return interval }
+    if snapshot.counts.waiting > 0, !watcher.isWatching { return interval }
+    return max(interval, Self.quietInterval)
   }
 
   func start() {
     pollTask?.cancel()
+    watcher.start { [weak self] in
+      Task { @MainActor in await self?.refresh() }
+    }
     pollTask = Task { [weak self] in
       while !Task.isCancelled {
         guard let self else { return }
@@ -140,9 +151,16 @@ final class SessionMonitor {
   func stop() {
     pollTask?.cancel()
     pollTask = nil
+    watcher.stop()
   }
 
   func refresh() async {
+    // A burst of hook writes and the poll timer can both land here; the extra
+    // scan would only reproduce the one already in flight.
+    guard !scanning else { return }
+    scanning = true
+    defer { scanning = false }
+
     var fresh = applyDismissals(to: await scanner.scan())
     markTurnStarts(in: &fresh)
     snapshot = fresh
