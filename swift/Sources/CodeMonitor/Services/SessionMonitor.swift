@@ -19,6 +19,18 @@ final class SessionMonitor {
   @ObservationIgnored private let scanner = SessionScanner()
   @ObservationIgnored private var pollTask: Task<Void, Never>?
   @ObservationIgnored private var interval: TimeInterval = 2
+  /// Driven from here rather than by observing this object: the band is AppKit
+  /// and lives outside the SwiftUI graph, and this type already exists to feed
+  /// the surfaces that show a snapshot.
+  @ObservationIgnored private let band = AmbientBand()
+
+  var ambientBandEnabled: Bool {
+    get { UserDefaults.standard.object(forKey: "ambientBand") as? Bool ?? true }
+    set {
+      UserDefaults.standard.set(newValue, forKey: "ambientBand")
+      band.update(with: snapshot, enabled: newValue)
+    }
+  }
 
   var refreshInterval: TimeInterval {
     get { interval }
@@ -47,9 +59,12 @@ final class SessionMonitor {
 
   /// The gap before the next scan, chosen from what the last one found.
   ///
-  /// Only a `running` session changes on its own, so only a running session
-  /// earns the fast cadence. `idle` and `waiting` are both static until the
-  /// user does something, and polling them at full rate reflects nothing.
+  /// A `running` session changes on its own, so it earns the fast cadence. A
+  /// `waiting` one does not — but the ambient band is lit for as long as it
+  /// waits, and the band going out is how the user sees that their answer
+  /// registered. At the quiet cadence that confirmation trails by up to fifteen
+  /// seconds, which reads as the signal being broken rather than as polling
+  /// being thrifty (ADR-0014). So only `idle` still buys the slow cadence.
   ///
   /// This also keeps the one clock-driven transition sharp: a session becomes
   /// `waiting` by *not* being touched for long enough, and it is `running`
@@ -57,7 +72,8 @@ final class SessionMonitor {
   /// the threshold passes. Watching the filesystem could not do this; the
   /// signal is the absence of an event.
   private var nextDelay: TimeInterval {
-    snapshot.counts.running > 0 ? interval : max(interval, Self.quietInterval)
+    snapshot.counts.running > 0 || snapshot.counts.waiting > 0
+      ? interval : max(interval, Self.quietInterval)
   }
 
   func start() {
@@ -78,6 +94,7 @@ final class SessionMonitor {
 
   func refresh() async {
     snapshot = applyDismissals(to: await scanner.scan())
+    band.update(with: snapshot, enabled: ambientBandEnabled)
   }
 
   // MARK: - Dismissal

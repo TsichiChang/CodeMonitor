@@ -82,3 +82,17 @@ A state the tool itself reported, rather than one we inferred from file
 timestamps. Only some tools can report one, so both kinds coexist and inferred
 state is the weaker claim.
 _Avoid_: Real state, true state, confirmed
+
+**Dead wait**:
+Time an agent spends waiting while the user is at the keyboard, working in a
+different session. The quantity this app exists to shrink, and the one it can be
+judged by — it is measurable from transcripts alone.
+_Avoid_: Idle time, delay, latency
+
+## Display
+
+**Ambient signal**:
+Something that gets noticed without being looked at. It says that a session
+needs the user and how urgently, never which one — identity costs a glance, and
+a glance is what this is for avoiding.
+_Avoid_: Notification, alert, badge

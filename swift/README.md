@@ -67,7 +67,29 @@ to restore it from.
 | `Services/TerminalFocus.swift` | Jump-to-terminal, per-host |
 | `Services/SessionMonitor.swift` | `@Observable` poll loop driving the UI |
 | `Services/Shell.swift` | Bounded child-process execution (jump path only) |
+| `Views/AmbientBand.swift` | The edge glow — AppKit, above full-screen apps |
 | `Views/` | SwiftUI dashboard, cards, menu bar, settings |
+
+## Being noticed
+
+Measured over two weeks of transcripts, an agent sat waiting more than five
+minutes **7.6 times a day while the user was at the keyboard, in another
+session** — three times a day beyond ten minutes. The menu-bar icon was already
+amber through every one of them. It went unseen because it is small, still, and
+outside where the eye is pointed (ADR-0014).
+
+So this exists for that, and it is not the dashboard: **a glow at the bottom
+edge of every screen** while a session is blocked on you. It breathes — brighter
+and faster the longer the wait — and says nothing about *which* session, because
+identity costs a glance and avoiding the glance is the point. It sits above
+full-screen apps, passes clicks through, takes no focus and needs no permission.
+Turn it off in Settings.
+
+Only a *reported* wait lights it. An inferred one means a tool call went quiet
+for 45 seconds, and a guess does not get to light up the room.
+
+Re-run `tools/dead-wait.py` after a week: if 7.6 drops to one or two, the glow
+did its job.
 
 ## How a session is classified
 

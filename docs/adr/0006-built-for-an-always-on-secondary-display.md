@@ -1,3 +1,7 @@
+---
+status: partially revised by ADR-0014
+---
+
 # Built for an always-on secondary display, not a menu-bar glance
 
 The intended deployment is a small dedicated screen (roughly 7–10", ~1024×600)
