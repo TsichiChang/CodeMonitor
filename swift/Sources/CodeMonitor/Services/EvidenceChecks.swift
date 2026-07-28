@@ -147,6 +147,48 @@ enum EvidenceChecks {
   /// Everything `--selftest` checks: derivation, hook events, transcript records.
   static var count: Int { cases.count + hookEvents.count + transcriptCases.count }
 
+  /// Ordering has to be stable within a state, or cards trade places on their
+  /// own. Two running sessions whose last activity differs — and moves, as a
+  /// running session's does on every tool call — must still sort the same way.
+  static func runOrderingChecks() -> Int {
+    let now = Date()
+    func session(_ project: String, _ state: SessionState, agoSeconds: TimeInterval)
+      -> SessionInfo
+    {
+      SessionInfo(
+        id: "claude:\(project)", tool: .claude, projectPath: "/tmp/\(project)",
+        workingDirectory: "/tmp/\(project)", project: project,
+        evidence: Evidence(
+          .turnInFlight, at: now.addingTimeInterval(-agoSeconds), source: .reported),
+        state: state)
+    }
+
+    var failures = 0
+    func check(_ name: String, _ passed: Bool) {
+      if passed { print("  ✓ \(name)") } else { failures += 1; print("  ✗ \(name)") }
+    }
+
+    let freshFirst = [session("alpha", .running, agoSeconds: 1),
+                      session("beta", .running, agoSeconds: 90)]
+    let staleFirst = [session("alpha", .running, agoSeconds: 90),
+                      session("beta", .running, agoSeconds: 1)]
+    check(
+      "two running sessions keep their order when one acts",
+      freshFirst.sorted(by: SessionInfo.inAttentionOrder).map(\.project)
+        == staleFirst.sorted(by: SessionInfo.inAttentionOrder).map(\.project))
+
+    let mixed = [session("idle-old", .idle, agoSeconds: 600),
+                 session("running", .running, agoSeconds: 300),
+                 session("waiting-new", .waiting, agoSeconds: 10),
+                 session("waiting-old", .waiting, agoSeconds: 900)]
+      .sorted(by: SessionInfo.inAttentionOrder)
+    check(
+      "longest wait comes first, then running, then idle",
+      mixed.map(\.project) == ["waiting-old", "waiting-new", "running", "idle-old"])
+
+    return failures
+  }
+
   /// Runs the tables. Returns the number of failures.
   static func run() -> Int {
     let now = Date()

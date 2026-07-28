@@ -105,6 +105,32 @@ struct SessionInfo: Identifiable, Sendable, Hashable {
   /// When this session was last observed doing anything.
   var lastActivity: Date { evidence.at }
 
+  /// The order sessions are shown in, and the order the jump shortcut walks
+  /// through. One rule, so what you see and what a keypress does agree.
+  ///
+  /// Within a state the key has to be *stable*, which is the whole subtlety
+  /// here. A running session's `lastActivity` moves on every hook event — twice
+  /// per tool call — so ordering running sessions by it made two cards trade
+  /// places every few seconds. That is motion carrying no information, on a
+  /// display where motion is the expensive thing (ADR-0006), and it made
+  /// pressing the shortcut twice land back where it started.
+  static func inAttentionOrder(_ a: SessionInfo, _ b: SessionInfo) -> Bool {
+    if a.state.order != b.state.order { return a.state.order < b.state.order }
+    switch a.state {
+    case .waiting:
+      // Longest wait first: it has cost the most time. Stable, because a
+      // session that is waiting is by definition producing no events.
+      return a.lastActivity < b.lastActivity
+    case .running:
+      // Which of two running sessions called a tool most recently is not
+      // something anyone acts on, so it buys nothing and costs stability.
+      return (a.project, a.id) < (b.project, b.id)
+    case .idle:
+      // Most recent first, and stable for the same reason waiting is.
+      return a.lastActivity > b.lastActivity
+    }
+  }
+
   /// Whether this session's state is solid enough to animate a card for.
   ///
   /// A reported block means Claude Code fired `PermissionRequest`. An inferred
@@ -169,19 +195,11 @@ struct SessionSnapshot: Sendable {
     sessions.map { "\($0.id):\($0.state.rawValue)" }
   }
 
-  /// Every session in the order the jump shortcut visits them.
-  ///
-  /// The one ordering the app has — the shortcut and `--focus-next` both read
-  /// it, so what a keypress does can be checked from a terminal.
+  /// Every session in the order the jump shortcut visits them — which is also
+  /// the order they are displayed in, since the scanner sorts by the same rule.
+  /// `--focus-next --dry-run` therefore prints what is on screen.
   var byAttention: [SessionInfo] {
-    sessions.sorted { a, b in
-      if a.state != b.state { return a.state.order < b.state.order }
-      // Oldest first for waiting — it has been costing the most time — and
-      // newest first for everything else, which is recency.
-      return a.state == .waiting
-        ? a.lastActivity < b.lastActivity
-        : a.lastActivity > b.lastActivity
-    }
+    sessions.sorted(by: SessionInfo.inAttentionOrder)
   }
 
   /// The next session to jump to, given the one jumped to last.

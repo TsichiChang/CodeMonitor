@@ -32,11 +32,7 @@ actor SessionScanner {
       sessions[index].state = sessions[index].evidence.state(now: now)
     }
 
-    sessions.sort { lhs, rhs in
-      lhs.state.order != rhs.state.order
-        ? lhs.state.order < rhs.state.order
-        : lhs.lastActivity > rhs.lastActivity
-    }
+    sessions.sort(by: SessionInfo.inAttentionOrder)
 
     var counts = StateCounts()
     for session in sessions { counts[session.state] += 1 }
