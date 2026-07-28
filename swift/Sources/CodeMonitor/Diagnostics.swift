@@ -70,7 +70,8 @@ enum Diagnostics {
     case "--selftest":
       print("Evidence derivation")
       let failures = EvidenceChecks.run()
-      print(failures == 0 ? "\nall \(EvidenceChecks.cases.count) evidence cases pass" : "\n\(failures) FAILED")
+      let total = EvidenceChecks.count
+      print(failures == 0 ? "\nall \(total) checks pass" : "\n\(failures) FAILED")
       exit(failures == 0 ? 0 : 1)
     default:
       print(usage)

@@ -77,7 +77,10 @@ final class ClaudeSource: SessionSource {
   ///
   /// Only the observation — how long ago it was, and what that means, is the
   /// derivation's business (ADR-0012).
-  private static func activity(_ entry: ClaudeEntry?) -> Activity {
+  ///
+  /// Not private so `--selftest` can run records through it: this is the whole
+  /// of what a session without a hook is judged on.
+  static func activity(_ entry: ClaudeEntry?) -> Activity {
     guard let entry else { return .unknown }
 
     switch entry.role {
@@ -91,6 +94,12 @@ final class ClaudeSource: SessionSource {
       }
       return .turnInFlight
     case "user":
+      // Esc is written as a user record too, and reading it as a handover is
+      // backwards: the turn ended and the session is waiting for whatever is
+      // typed next. Left as a turn in flight it went quiet instead, and a quiet
+      // inferred turn is read as a suspected block — so an interrupted session
+      // spent ten minutes claiming to want approval for something.
+      if entry.interrupted { return .turnComplete }
       // A prompt or a tool result just landed; the model owns the next turn.
       return .turnInFlight
     default:

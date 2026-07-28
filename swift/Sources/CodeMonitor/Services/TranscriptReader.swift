@@ -17,6 +17,9 @@ struct ClaudeEntry: Sendable {
   var entrypoint: String?
   var stopReason: String?
   var hasToolUse = false
+  /// The user took the turn back — Claude Code's own marker for Esc, written as
+  /// a user record even though no prompt was submitted.
+  var interrupted = false
   var cwd: String?
   var gitBranch: String?
   var model: String?
@@ -98,12 +101,29 @@ enum TranscriptReader {
     entry.role = str(message["role"]) ?? str(raw["role"])
     entry.stopReason = str(message["stop_reason"])
     entry.hasToolUse = content.contains { str(dict($0)["type"]) == "tool_use" }
+    entry.interrupted = isInterrupt(message: message, content: content)
     entry.entrypoint = str(raw["entrypoint"])
     entry.cwd = str(raw["cwd"])
     entry.gitBranch = str(raw["gitBranch"])
     entry.model = str(message["model"])
     entry.snippet = claudeSnippet(message: message, content: content)
     return entry
+  }
+
+  /// Whether this record is Claude Code's note that the user pressed Esc.
+  ///
+  /// It is written as a user record, which otherwise means a prompt was
+  /// submitted and the model now owns the turn. Here the opposite happened. The
+  /// marker carries a suffix when the interrupt landed mid-tool-call
+  /// (`… by user for tool use`), so only the stem is matched, and it arrives
+  /// either as a bare string or as a text block depending on where it was
+  /// raised.
+  private static func isInterrupt(message: [String: Any], content: [Any]) -> Bool {
+    let marker = "[Request interrupted"
+    if str(message["content"])?.hasPrefix(marker) == true { return true }
+    return content.contains { block in
+      str(dict(block)["text"])?.hasPrefix(marker) == true
+    }
   }
 
   private static func claudeSnippet(message: [String: Any], content: [Any]) -> String? {

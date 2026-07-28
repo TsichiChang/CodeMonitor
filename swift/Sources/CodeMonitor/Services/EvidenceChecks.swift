@@ -81,7 +81,59 @@ enum EvidenceChecks {
       age: 1, expectedState: .running, expectedCurrent: true),
   ]
 
-  /// Runs the table. Returns the number of failures.
+  /// Hook event names, the other half of what used to live in the user's
+  /// settings file.
+  static let hookEvents: [(event: String?, expected: Activity)] = [
+    ("SessionStart", .opened),
+    ("PermissionRequest", .blockedOnUser),
+    ("Notification:permission_prompt", .blockedOnUser),
+    ("Notification:idle_prompt", .turnComplete),
+    ("Stop", .turnComplete),
+    ("StopFailure", .turnComplete),
+    ("Stop:subagent-running", .turnInFlight),
+    ("PostToolUse", .turnInFlight),
+    (nil, .unknown),
+  ]
+
+  /// Claude transcript records, as they appear on disk, and what each says.
+  static let transcriptCases: [(name: String, line: String, expected: Activity)] = [
+    (
+      "a prompt hands the turn to the model",
+      #"{"type":"user","message":{"role":"user","content":"carry on"}}"#,
+      .turnInFlight
+    ),
+    (
+      "Esc takes the turn back rather than handing it over",
+      #"{"type":"user","message":{"role":"user","content":"[Request interrupted by user]"}}"#,
+      .turnComplete
+    ),
+    (
+      "Esc during a tool call reads the same",
+      #"""
+      {"type":"user","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user for tool use]"}]}}
+      """#,
+      .turnComplete
+    ),
+    (
+      "a dispatched tool is a turn in flight",
+      #"""
+      {"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash"}]}}
+      """#,
+      .turnInFlight
+    ),
+    (
+      "end_turn completes the turn",
+      #"""
+      {"type":"assistant","message":{"role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"done"}]}}
+      """#,
+      .turnComplete
+    ),
+  ]
+
+  /// Everything `--selftest` checks: derivation, hook events, transcript records.
+  static var count: Int { cases.count + hookEvents.count + transcriptCases.count }
+
+  /// Runs the tables. Returns the number of failures.
   static func run() -> Int {
     let now = Date()
     var failures = 0
@@ -108,25 +160,27 @@ enum EvidenceChecks {
       }
     }
 
-    // The hook reports event names; the mapping from those is the other half of
-    // what used to live in the user's settings file.
-    let events: [(String?, Activity)] = [
-      ("SessionStart", .opened),
-      ("PermissionRequest", .blockedOnUser),
-      ("Notification:permission_prompt", .blockedOnUser),
-      ("Notification:idle_prompt", .turnComplete),
-      ("Stop", .turnComplete),
-      ("Stop:subagent-running", .turnInFlight),
-      ("PostToolUse", .turnInFlight),
-      (nil, .unknown),
-    ]
-    for (event, expected) in events {
+    for (event, expected) in hookEvents {
       let actual = HookStateStore.activity(forEvent: event)
       if actual == expected {
         print("  ✓ \(event ?? "(no event)") → \(expected.rawValue)")
       } else {
         failures += 1
         print("  ✗ \(event ?? "(no event)") → expected \(expected.rawValue), got \(actual.rawValue)")
+      }
+    }
+
+    // And a transcript record, which is all a session without a hook is judged
+    // on. Parsed rather than constructed, because the misreading that put an
+    // interrupted session in the waiting column was as much about the shape of
+    // the record as about the rule applied to it.
+    for (name, line, expected) in transcriptCases {
+      let actual = ClaudeSource.activity(TranscriptReader.parseClaudeTail(line))
+      if actual == expected {
+        print("  ✓ \(name)")
+      } else {
+        failures += 1
+        print("  ✗ \(name) → expected \(expected.rawValue), got \(actual.rawValue)")
       }
     }
 

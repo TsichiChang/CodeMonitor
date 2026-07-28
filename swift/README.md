@@ -26,11 +26,11 @@ session isn't detected or a jump lands in the wrong tab:
 
 ```bash
 APP="build/Code Monitor.app/Contents/MacOS/CodeMonitor"
-"$APP" --diagnose              # sessions + the host resolved for each
-"$APP" --focus oversea-fop     # actually jump to the matching session
-"$APP" --dismiss spare         # hide an idle session until it acts again
-"$APP" --restore               # un-hide everything
-"$APP" --selftest              # check the evidence-to-state derivation
+"$APP" --diagnose                 # sessions + the host resolved for each
+"$APP" --focus oversea-fop        # actually jump to the matching session
+"$APP" --dismiss spare            # hide an idle session until it acts again
+"$APP" --restore                  # un-hide everything
+"$APP" --selftest                 # check the evidence-to-state derivation
 ```
 
 ## App icon
@@ -107,19 +107,24 @@ precisely so several can coexist. Do not replace what is there.
 ```jsonc
 // under "hooks", add one of these objects to each named event's array:
 { "hooks": [{ "type": "command",
-  "command": "~/.claude/hooks/codemonitor-hook.sh <state> \"$PPID\"" }] }
+  "command": "~/.claude/hooks/codemonitor-hook.sh - \"$PPID\"" }] }
 ```
 
-| Event | `<state>` | Notes |
+Which event fired is read from the payload Claude sends on stdin, so the command
+is the same on every event but two:
+
+| Event | Command | Why |
 |---|---|---|
-| `SessionStart` | `idle` | append ` locate` — a new session is awaiting its first prompt |
-| `UserPromptSubmit` | `running` | append ` locate` |
-| `PreToolUse` | `running` | |
-| `PostToolUse` | `running` | |
-| `PermissionRequest` | `waiting` | the signal none of the inference can match |
-| `Notification` | `waiting` | |
-| `Stop` | `idle` | |
-| `SessionEnd` | `ended` | removes the session's state file |
+| `SessionStart` | `... - "$PPID" locate` | |
+| `UserPromptSubmit` | `... - "$PPID" locate` | |
+| `SessionEnd` | `... ended "$PPID"` | removes the session's state file — nothing later will |
+| `PreToolUse`, `PostToolUse`, `PermissionRequest`, `Notification`, `Stop`, `StopFailure` | `... - "$PPID"` | |
+
+The first argument once named the state each event meant, which made a line in
+`settings.json` the authoritative definition of a state. What an event means is
+now decided in Swift (ADR-0012) and anything but `ended` there is ignored, so an
+older registration keeps working untouched — `-` is only a placeholder holding
+the position of the pid.
 
 The trailing `locate` argument tells the hook to also record which terminal pane
 the session is in — the pane rather than the tab, because a split tab can hold

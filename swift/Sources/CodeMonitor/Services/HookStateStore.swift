@@ -133,7 +133,10 @@ enum HookStateStore {
     switch event {
     case "PermissionRequest", "Notification:permission_prompt":
       return .blockedOnUser
-    case "Stop", "SubagentStop", "Notification:idle_prompt":
+    case "Stop", "StopFailure", "SubagentStop", "Notification:idle_prompt":
+      // `StopFailure` is the turn ending without finishing. However it ended,
+      // the session is back to waiting on the user, which is the only thing
+      // this has to get right.
       return .turnComplete
     case "SessionStart":
       return .opened
