@@ -1,4 +1,16 @@
+---
+status: the collapse rule is revised by ADR-0013
+---
+
 # Idle sessions are deliberately dim
+
+> **Revised in one place.** "When space runs out" turned out to be the wrong
+> trigger: a threshold means a session changes shape because a *different*
+> session appeared, which is motion carrying no information about anything
+> being looked at. Idle sessions now collapse unconditionally, and each keeps
+> its own line rather than merging into one summary — a merged count already
+> exists in the header, and merging would also remove the only way to jump to
+> an idle session. See ADR-0013.
 
 Every session card used to be equally prominent — same size, same tint
 treatment, same animation budget. On a screen that is always in view, that
