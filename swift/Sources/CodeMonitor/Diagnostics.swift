@@ -18,7 +18,7 @@ enum Diagnostics {
       --focus <text>      Jump to the session whose project or cwd contains <text>.
       --dismiss <text>    Hide an idle session until it does something new.
       --restore           Un-hide everything hidden.
-      --selftest          Check the evidence-to-state derivation table.
+      --selftest          Check the evidence derivation and the layout ratios.
       --help              Show this message.
 
     With no arguments the app launches normally.
@@ -69,8 +69,8 @@ enum Diagnostics {
       await restore()
     case "--selftest":
       print("Evidence derivation")
-      let failures = EvidenceChecks.run()
-      let total = EvidenceChecks.count
+      let failures = EvidenceChecks.run() + Metrics.runChecks()
+      let total = EvidenceChecks.count + Metrics.checks.count
       print(failures == 0 ? "\nall \(total) checks pass" : "\n\(failures) FAILED")
       exit(failures == 0 ? 0 : 1)
     default:

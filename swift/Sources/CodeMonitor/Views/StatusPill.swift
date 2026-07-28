@@ -5,13 +5,15 @@ import SwiftUI
 struct StatusPill: View {
   let state: SessionState
 
+  @Environment(\.metrics) private var metrics
+
   var body: some View {
-    HStack(spacing: 4) {
+    HStack(spacing: metrics.caption * 0.4) {
       Circle()
         .fill(Palette.statusColor(state))
-        .frame(width: 6, height: 6)
+        .frame(width: metrics.caption * 0.6, height: metrics.caption * 0.6)
       Text(state.label)
-        .font(.caption.weight(.medium))
+        .font(.system(size: metrics.caption, weight: .medium))
         .foregroundStyle(.secondary)
     }
     .fixedSize()

@@ -157,6 +157,15 @@ struct SessionSnapshot: Sendable {
       return items.isEmpty ? nil : (tool, items)
     }
   }
+
+  /// What the display animates on: which sessions exist and what state each is
+  /// in. A scan lands every couple of seconds and almost always changes
+  /// something (elapsed time, a message snippet); animating on the snapshot
+  /// itself would keep the whole list in perpetual motion, on a display whose
+  /// scarcest resource is motion (ADR-0006).
+  var stateSignature: [String] {
+    sessions.map { "\($0.id):\($0.state.rawValue)" }
+  }
 }
 
 /// Outcome of a "jump to the terminal hosting this session" request.

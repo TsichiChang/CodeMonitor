@@ -30,7 +30,7 @@ APP="build/Code Monitor.app/Contents/MacOS/CodeMonitor"
 "$APP" --focus oversea-fop        # actually jump to the matching session
 "$APP" --dismiss spare            # hide an idle session until it acts again
 "$APP" --restore                  # un-hide everything
-"$APP" --selftest                 # check the evidence-to-state derivation
+"$APP" --selftest                 # evidence derivation + layout ratios
 ```
 
 ## App icon
@@ -67,7 +67,9 @@ to restore it from.
 | `Services/TerminalFocus.swift` | Jump-to-terminal, per-host |
 | `Services/SessionMonitor.swift` | `@Observable` poll loop driving the UI |
 | `Services/Shell.swift` | Bounded child-process execution (jump path only) |
+| `Views/Metrics.swift` | Every length, derived from the screen's point density |
 | `Views/AmbientBand.swift` | The edge glow — AppKit, above full-screen apps |
+| `Views/IdleRowView.swift` | An idle session, collapsed to a line |
 | `Views/` | SwiftUI dashboard, cards, menu bar, settings |
 
 ## Being noticed

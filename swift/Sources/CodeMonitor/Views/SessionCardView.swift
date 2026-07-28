@@ -12,104 +12,80 @@ import SwiftUI
 struct SessionCardView: View {
   let session: SessionInfo
   let onFocus: () -> Void
-  /// Present only for sessions the user is allowed to close.
-  var onDismiss: (() -> Void)?
 
   @Environment(\.colorScheme) private var scheme
+  @Environment(\.metrics) private var metrics
   @State private var isHovering = false
 
   var body: some View {
     Button(action: onFocus) {
-      VStack(alignment: .leading, spacing: 8) {
+      VStack(alignment: .leading, spacing: metrics.cardSpacing) {
         header
         metaRow
         statusRow
       }
-      .padding(14)
+      .padding(metrics.cardPadding)
       .frame(maxWidth: .infinity, alignment: .leading)
       .contentShape(Rectangle())
     }
     .buttonStyle(.plain)
     .modifier(BreathingBackground(session: session, scheme: scheme))
     .overlay(
-      RoundedRectangle(cornerRadius: 10)
-        .strokeBorder(isHovering ? Color.secondary.opacity(0.5) : Color.secondary.opacity(0.2))
+      RoundedRectangle(cornerRadius: metrics.cornerRadius)
+        .strokeBorder(
+          isHovering ? Color.secondary.opacity(0.5) : Color.secondary.opacity(0.2),
+          lineWidth: metrics.hairline)
     )
-    .clipShape(RoundedRectangle(cornerRadius: 10))
-    .overlay(alignment: .topTrailing) { dismissButton }
+    .clipShape(RoundedRectangle(cornerRadius: metrics.cornerRadius))
     .onHover { isHovering = $0 }
     .help("Jump to terminal")
   }
 
-  /// Shown on hover only. A card that is always wearing a close button invites
-  /// being tidied away; this one has to be reached for.
-  @ViewBuilder
-  private var dismissButton: some View {
-    if let onDismiss, isHovering {
-      Button(action: onDismiss) {
-        Image(systemName: "xmark")
-          .font(.system(size: 8, weight: .bold))
-          .foregroundStyle(.secondary)
-          .padding(4)
-          .background(Circle().fill(.background.opacity(0.75)))
-      }
-      .buttonStyle(.plain)
-      .padding(.top, 11)
-      .padding(.trailing, 11)
-      .help("Hide until this session does something new")
-      .transition(.opacity)
-    }
-  }
-
   private var header: some View {
-    HStack(alignment: .firstTextBaseline, spacing: 8) {
+    HStack(alignment: .firstTextBaseline, spacing: metrics.cardSpacing) {
       Text(session.project)
-        .font(.body.weight(.semibold))
+        .font(.system(size: metrics.body, weight: .semibold))
         .lineLimit(1)
         .truncationMode(.middle)
-      Spacer(minLength: 4)
+      Spacer(minLength: metrics.cardSpacing * 0.5)
       Text(Self.relativeTime(session.lastActivity))
-        .font(.caption)
+        .font(.system(size: metrics.caption))
         .monospacedDigit()
         .foregroundStyle(.tertiary)
-        // The close button is an overlay in this corner. Its width is reserved
-        // whether or not it is showing, so it never lands on top of the elapsed
-        // time and the time never jumps sideways on hover.
-        .padding(.trailing, onDismiss == nil ? 0 : 15)
     }
   }
 
   private var metaRow: some View {
-    HStack(spacing: 5) {
+    HStack(spacing: metrics.cardSpacing * 0.6) {
       if session.gitBranch != nil {
         Image(systemName: "arrow.trianglehead.branch")
-          .font(.caption2)
+          .font(.system(size: metrics.caption * 0.9))
           .foregroundStyle(.tertiary)
       }
       if !metaText.isEmpty {
         Text(metaText)
-          .font(.caption)
+          .font(.system(size: metrics.caption))
           .foregroundStyle(.tertiary)
           .lineLimit(1)
       }
     }
     // Reserve the row even when empty so cards keep a uniform height.
-    .frame(height: 14, alignment: .leading)
+    .frame(height: metrics.caption * 1.4, alignment: .leading)
     .frame(maxWidth: .infinity, alignment: .leading)
   }
 
   private var statusRow: some View {
-    HStack(spacing: 8) {
+    HStack(spacing: metrics.cardSpacing) {
       StatusPill(state: session.state)
       if session.subagentCount > 0 {
         Label("\(session.subagentCount)", systemImage: "circle.hexagongrid")
-          .font(.caption)
+          .font(.system(size: metrics.caption))
           .foregroundStyle(.secondary)
           .help("\(session.subagentCount) sub-agent\(session.subagentCount == 1 ? "" : "s") running under this session")
       }
       if let message = session.lastMessage {
         Text(message)
-          .font(.caption)
+          .font(.system(size: metrics.caption))
           .foregroundStyle(.tertiary)
           .lineLimit(1)
       }
