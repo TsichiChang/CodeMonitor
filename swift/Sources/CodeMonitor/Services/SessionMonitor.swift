@@ -43,11 +43,58 @@ final class SessionMonitor {
     }
   }
 
-  init() {
+  /// - Parameter registersHotKey: only the running app may claim the shortcut.
+  ///   A hot key is owned by one process at a time, so a CLI command that took
+  ///   it — every diagnostic builds one of these — would leave the app unable
+  ///   to register at launch, silently, for as long as that process lived.
+  init(registersHotKey: Bool = false) {
     let stored = UserDefaults.standard.double(forKey: "refreshInterval")
     if stored >= 0.5, stored <= 60 { interval = stored }
     HookStateStore.pruneAbandoned()
     start()
+    guard registersHotKey else { return }
+    hotKey = GlobalHotKey { [weak self] in
+      Task { await self?.focusNext() }
+    }
+  }
+
+  // MARK: - Jump to the next session that needs you
+
+  @ObservationIgnored private var hotKey: GlobalHotKey?
+  @ObservationIgnored private var lastJumped: (id: String, at: Date)?
+
+  /// How long a jump keeps its place in the queue.
+  ///
+  /// Press again inside this and it advances — "not that one, next". Come back
+  /// later and it starts from the most urgent again, which by then is usually a
+  /// different session, and is what a jump after any real pause should mean.
+  private static let queueWindow: TimeInterval = 8
+
+  /// Jumps to whatever most deserves attention, then to the next one, and so on.
+  ///
+  /// No selection is involved and none is displayed: arriving is what answers
+  /// "which session?", so nothing on screen has to (ADR-0014).
+  func focusNext() async {
+    var previous = lastJumped.flatMap {
+      Date().timeIntervalSince($0.at) < Self.queueWindow ? $0.id : nil
+    }
+    // Outside that window the queue restarts — but not onto the session already
+    // in front of the user. Jumping to where they are looks identical to the
+    // key doing nothing, and costs a second press to get anywhere.
+    if previous == nil, let last = lastJumped?.id,
+      let session = snapshot.sessions.first(where: { $0.id == last }),
+      await TerminalFocus.isHostFrontmost(pid: session.pid)
+    {
+      previous = last
+    }
+
+    guard let target = snapshot.nextToHandle(after: previous) else { return }
+    lastJumped = (target.id, Date())
+    await focus(target)
+  }
+
+  var hotKeyDescription: String? {
+    hotKey == nil ? nil : GlobalHotKey.displayName
   }
 
   /// How long to wait when nothing is running.
@@ -59,18 +106,21 @@ final class SessionMonitor {
 
   /// The gap before the next scan, chosen from what the last one found.
   ///
-  /// A `running` session changes on its own, so it earns the fast cadence. A
-  /// `waiting` one does not — but the ambient band is lit for as long as it
-  /// waits, and the band going out is how the user sees that their answer
-  /// registered. At the quiet cadence that confirmation trails by up to fifteen
-  /// seconds, which reads as the signal being broken rather than as polling
-  /// being thrifty (ADR-0014). So only `idle` still buys the slow cadence.
+  /// Only a `running` session changes on its own, so only a running session
+  /// earns the fast cadence. `idle` and `waiting` are both static until the
+  /// user does something, and polling them at full rate reflects nothing.
   ///
   /// This also keeps the one clock-driven transition sharp: a session becomes
   /// `waiting` by *not* being touched for long enough, and it is `running`
   /// right up until that moment — so the fast cadence is still in force when
   /// the threshold passes. Watching the filesystem could not do this; the
   /// signal is the absence of an event.
+  /// Waiting now earns the fast cadence too, which it did not before the
+  /// ambient band existed. Nothing about a waiting session changes on its own —
+  /// but the band is lit for as long as it waits, and the band going out is how
+  /// the user sees that their answer registered. At the quiet cadence that
+  /// confirmation trails by up to fifteen seconds, which reads as the signal
+  /// being broken rather than as polling being thrifty (ADR-0014).
   private var nextDelay: TimeInterval {
     snapshot.counts.running > 0 || snapshot.counts.waiting > 0
       ? interval : max(interval, Self.quietInterval)

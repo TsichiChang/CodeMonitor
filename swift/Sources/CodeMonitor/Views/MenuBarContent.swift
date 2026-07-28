@@ -16,8 +16,16 @@ struct MenuBarContent: View {
     if monitor.snapshot.sessions.isEmpty {
       Text("No active sessions")
     } else {
+      Button("Jump to Next  \(monitor.hotKeyDescription ?? "(shortcut unavailable)")") {
+        Task { await monitor.focusNext() }
+      }
+      // Named even when the key could not be claimed — another process holding
+      // it fails silently, and a menu item that quietly loses its shortcut is
+      // how that went unnoticed.
+      Divider()
+      // In the order the shortcut visits them, so the list and the key agree.
       // Bounded so a busy machine can't produce an unusable menu.
-      ForEach(monitor.snapshot.sessions.prefix(20)) { session in
+      ForEach(monitor.snapshot.byAttention.prefix(20)) { session in
         Button("\(session.state.glyph)  \(session.project) — \(session.state.shortLabel)") {
           Task { await monitor.focus(session) }
         }
@@ -25,6 +33,18 @@ struct MenuBarContent: View {
     }
 
     Divider()
+
+    // Hiding lives here as well as on the card, because the card may be on a
+    // display nobody can reach — an ambient surface is looked at, not pointed
+    // at (ADR-0014). Low-frequency action, so a submenu is the right cost.
+    let hideable = monitor.snapshot.sessions.filter { $0.state == .idle }
+    if !hideable.isEmpty {
+      Menu("Hide an Idle Session") {
+        ForEach(hideable) { session in
+          Button(session.project) { monitor.dismiss(session) }
+        }
+      }
+    }
 
     // Only offered when something is actually hidden, so dismissing never
     // becomes a one-way door the user cannot find their way back through.

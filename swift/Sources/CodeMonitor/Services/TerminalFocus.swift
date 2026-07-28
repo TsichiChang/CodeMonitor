@@ -145,6 +145,23 @@ enum TerminalFocus {
 
   /// Identifies the hosting terminal, preferring the session's exported
   /// `TERM_PROGRAM` and falling back to a ppid walk for terminals that set none.
+  /// Whether this session's host application is the one in front right now.
+  ///
+  /// The jump shortcut skips such a session: landing where the user already is
+  /// looks exactly like the key not working, which costs a second press
+  /// (ADR-0014). It answers per *application*, not per tab — two sessions in
+  /// one terminal cannot be told apart from outside it — so it is deliberately
+  /// only consulted for the session jumped to last, never to filter the queue.
+  static func isHostFrontmost(pid: Int32?) async -> Bool {
+    guard let pid,
+      let front = await MainActor.run(body: {
+        NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+      }),
+      let host = await identifyHost(pid: pid)
+    else { return false }
+    return host.bundleID == front
+  }
+
   private static func identifyHost(pid: Int32) async -> TerminalApp? {
     if let termProgram = ProcessScanner.environmentValue("TERM_PROGRAM", of: pid),
       let match = terminals.first(where: {

@@ -56,7 +56,9 @@ enum SessionState: String, Sendable, Hashable {
     }
   }
 
-  /// Sort weight — most urgent first.
+  /// Sort weight — most urgent first. Also the order the jump shortcut works
+  /// through: whatever is blocking a person, then what is under way, then what
+  /// is merely sitting there.
   var order: Int {
     switch self {
     case .waiting: 0
@@ -165,6 +167,36 @@ struct SessionSnapshot: Sendable {
   /// scarcest resource is motion (ADR-0006).
   var stateSignature: [String] {
     sessions.map { "\($0.id):\($0.state.rawValue)" }
+  }
+
+  /// Every session in the order the jump shortcut visits them.
+  ///
+  /// The one ordering the app has — the shortcut and `--focus-next` both read
+  /// it, so what a keypress does can be checked from a terminal.
+  var byAttention: [SessionInfo] {
+    sessions.sorted { a, b in
+      if a.state != b.state { return a.state.order < b.state.order }
+      // Oldest first for waiting — it has been costing the most time — and
+      // newest first for everything else, which is recency.
+      return a.state == .waiting
+        ? a.lastActivity < b.lastActivity
+        : a.lastActivity > b.lastActivity
+    }
+  }
+
+  /// The next session to jump to, given the one jumped to last.
+  ///
+  /// Queue consumption, not selection: there is no aiming step to display, so
+  /// nothing on screen has to show which session is "current" (ADR-0014).
+  /// Passing the previous target advances past it; passing nil starts at the
+  /// most urgent, which is what a jump after any pause should do.
+  func nextToHandle(after previous: String?) -> SessionInfo? {
+    let ordered = byAttention
+    guard !ordered.isEmpty else { return nil }
+    guard let previous, let at = ordered.firstIndex(where: { $0.id == previous }) else {
+      return ordered.first
+    }
+    return ordered[(at + 1) % ordered.count]
   }
 }
 

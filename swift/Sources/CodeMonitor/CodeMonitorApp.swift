@@ -8,7 +8,8 @@ enum WindowID {
 }
 
 struct CodeMonitorApp: App {
-  @State private var monitor = SessionMonitor()
+  /// The one instance that claims the global shortcut — see `SessionMonitor.init`.
+  @State private var monitor = SessionMonitor(registersHotKey: true)
   @AppStorage("appearance") private var appearance = Appearance.system
 
   var body: some Scene {

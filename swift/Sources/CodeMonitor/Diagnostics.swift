@@ -16,16 +16,19 @@ enum Diagnostics {
 
       --diagnose          List detected sessions and their resolved terminal host.
       --focus <text>      Jump to the session whose project or cwd contains <text>.
+      --focus-next        Jump to whatever most deserves attention — what the
+                          global shortcut does. Add --dry-run to only show the order.
       --dismiss <text>    Hide an idle session until it does something new.
       --restore           Un-hide everything hidden.
-      --selftest          Check the evidence derivation and the layout ratios.
+      --selftest          Check the evidence-to-state derivation table.
       --help              Show this message.
 
     With no arguments the app launches normally.
     """
 
   private static let flags: Set<String> = [
-    "--diagnose", "--focus", "--dismiss", "--restore", "--selftest", "--help", "-h",
+    "--diagnose", "--focus", "--focus-next", "--dismiss", "--restore", "--selftest",
+    "--help", "-h",
   ]
 
   /// Whether these arguments select a CLI command rather than the GUI.
@@ -59,6 +62,8 @@ enum Diagnostics {
         exit(2)
       }
       await focus(matching: arguments[2])
+    case "--focus-next":
+      await focusNext(dryRun: arguments.contains("--dry-run"))
     case "--dismiss":
       guard arguments.count > 2 else {
         print("error: --dismiss needs a search string\n\n\(usage)")
@@ -91,6 +96,34 @@ enum Diagnostics {
     }
     monitor.dismiss(session)
     print("Hidden \"\(session.project)\" (\(session.id)) until it does something new.")
+  }
+
+  /// What the global shortcut does, and — with `--dry-run` — the order it works
+  /// through. The keypress and this command read the same ordering, so what a
+  /// key does can be checked without pressing it.
+  @MainActor
+  private static func focusNext(dryRun: Bool) async {
+    let monitor = SessionMonitor()
+    defer { monitor.stop() }
+    await monitor.refresh()
+
+    let ordered = monitor.snapshot.byAttention
+    guard let first = ordered.first else {
+      print("Nothing to jump to.")
+      exit(1)
+    }
+
+    if dryRun {
+      print("Order the shortcut works through:")
+      for (index, session) in ordered.enumerated() {
+        let waited = SessionCardView.relativeTime(session.lastActivity)
+        print("  \(index + 1). \(session.project)  \(session.state.rawValue)  \(waited)")
+      }
+      return
+    }
+
+    print("→ \(first.project) (\(first.state.rawValue))")
+    await monitor.focusNext()
   }
 
   @MainActor

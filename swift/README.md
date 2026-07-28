@@ -28,6 +28,7 @@ session isn't detected or a jump lands in the wrong tab:
 APP="build/Code Monitor.app/Contents/MacOS/CodeMonitor"
 "$APP" --diagnose                 # sessions + the host resolved for each
 "$APP" --focus oversea-fop        # actually jump to the matching session
+"$APP" --focus-next --dry-run     # the order the global shortcut works through
 "$APP" --dismiss spare            # hide an idle session until it acts again
 "$APP" --restore                  # un-hide everything
 "$APP" --selftest                 # evidence derivation + layout ratios
@@ -66,13 +67,14 @@ to restore it from.
 | `Services/SessionScanner.swift` | Merges sources, processes and reports into a snapshot |
 | `Services/TerminalFocus.swift` | Jump-to-terminal, per-host |
 | `Services/SessionMonitor.swift` | `@Observable` poll loop driving the UI |
+| `Services/GlobalHotKey.swift` | The system-wide jump shortcut, through Carbon |
 | `Services/Shell.swift` | Bounded child-process execution (jump path only) |
 | `Views/Metrics.swift` | Every length, derived from the screen's point density |
 | `Views/AmbientBand.swift` | The edge glow — AppKit, above full-screen apps |
 | `Views/IdleRowView.swift` | An idle session, collapsed to a line |
 | `Views/` | SwiftUI dashboard, cards, menu bar, settings |
 
-## Being noticed
+## Being noticed, and getting there
 
 Measured over two weeks of transcripts, an agent sat waiting more than five
 minutes **7.6 times a day while the user was at the keyboard, in another
@@ -80,15 +82,21 @@ session** — three times a day beyond ten minutes. The menu-bar icon was alread
 amber through every one of them. It went unseen because it is small, still, and
 outside where the eye is pointed (ADR-0014).
 
-So this exists for that, and it is not the dashboard: **a glow at the bottom
-edge of every screen** while a session is blocked on you. It breathes — brighter
-and faster the longer the wait — and says nothing about *which* session, because
-identity costs a glance and avoiding the glance is the point. It sits above
-full-screen apps, passes clicks through, takes no focus and needs no permission.
-Turn it off in Settings.
+So two things exist for that, and neither of them is the dashboard:
 
-Only a *reported* wait lights it. An inferred one means a tool call went quiet
-for 45 seconds, and a guess does not get to light up the room.
+- **A glow at the bottom edge of every screen** while a session is blocked on
+  you. It breathes — brighter and faster the longer the wait — and says nothing
+  about *which* session, because identity costs a glance and avoiding the glance
+  is the point. It sits above full-screen apps, passes clicks through, takes no
+  focus and needs no permission. Turn it off in Settings.
+- **⌃⌥⌘J jumps to whatever most deserves attention** — longest-waiting first,
+  then running, then idle. Press again within twenty seconds and it advances to
+  the next; after that it starts from the most urgent again. There is no
+  selection to aim with, and so nothing on screen has to show one: arriving is
+  what answers "which session?". `--focus-next --dry-run` prints the order.
+
+Only a *reported* wait lights the band. An inferred one means a tool call went
+quiet for 45 seconds, and a guess does not get to light up the room.
 
 Re-run `tools/dead-wait.py` after a week: if 7.6 drops to one or two, the glow
 did its job.
