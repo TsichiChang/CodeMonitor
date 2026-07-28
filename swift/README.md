@@ -171,6 +171,37 @@ file per session, which is why it survives the app being closed. Set
 `CODEMONITOR_STATE_DIR` to relocate it. To undo everything, remove the entries
 from `settings.json` and delete that directory.
 
+### Codex
+
+The same script, told which tool it is speaking for. Append to the arrays in
+`~/.codex/hooks.json` — each event is a list there too, so it coexists with
+whatever else is registered:
+
+```jsonc
+{ "hooks": [{ "type": "command",
+  "command": "CODEMONITOR_TOOL=codex ~/.claude/hooks/codemonitor-hook.sh - \"$PPID\"" }] }
+```
+
+Codex fires four events — `SessionStart`, `UserPromptSubmit`, `Stop`,
+`PermissionRequest` — and the names mean what they mean for Claude, so the same
+interpretation applies with nothing added. What is missing is `PreToolUse` and
+`PostToolUse`: a Codex turn reports its start and its end but nothing in
+between, so a long turn stays `running` on the strength of the last
+`UserPromptSubmit` rather than being re-confirmed by each tool call.
+
+Codex also has a `notify` command, and it is **not** usable for this. Unlike the
+hook arrays it is a single command per installation — `config.toml` holds one —
+so registering there would evict whatever is already using it rather than join
+it.
+
+Check it end to end without waiting for a real session:
+
+```bash
+printf '%s' '{"payload":{"id":"test-1","cwd":"'"$PWD"'"},"hook_event_name":"PermissionRequest"}' \
+  | CODEMONITOR_TOOL=codex ~/.claude/hooks/codemonitor-hook.sh - $$
+cat ~/.local/state/codemonitor/sessions/test-1.json
+```
+
 ## Sub-agents
 
 A program that farms work out to sub-agents gets one transcript per agent, and

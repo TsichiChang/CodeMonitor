@@ -12,6 +12,15 @@ plus a hooks feature, and OpenCode records sessions in SQLite. We are dropping
 the constraint so we can consume these, keeping passive detection as the floor
 so an unconfigured machine still works.
 
+> **On Codex, only the hooks.** `notify` turned out to be one command per
+> installation — `config.toml` holds a single entry — so registering there
+> evicts whatever already uses it instead of joining it. On this machine that
+> was Codex Computer Use. The hook arrays coexist the way Claude's do, and the
+> four events Codex fires (`SessionStart`, `UserPromptSubmit`, `Stop`,
+> `PermissionRequest`) are a subset of Claude's with the same meanings, so they
+> needed no new interpretation. What Codex has no equivalent of is
+> `PreToolUse`/`PostToolUse`, so a turn is reported at its edges only.
+
 ## Consequences
 
 Installing a hook means writing to a config file the user owns, so it must be

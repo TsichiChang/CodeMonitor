@@ -21,6 +21,12 @@
 #   <event-state>  only `ended` is acted on here — it removes the session's file
 #                  because no later event will. Any other value is ignored.
 #   <agent-pid>    the agent process's pid ($PPID at hook time)
+#
+# Set CODEMONITOR_TOOL=codex to report a Codex session. The event names Codex
+# fires — SessionStart, UserPromptSubmit, Stop, PermissionRequest — are a subset
+# of Claude's and mean the same things, so the interpretation table in Swift is
+# shared rather than duplicated (ADR-0004 is about adapters reading *stores*;
+# these are the same event vocabulary arriving by the same route).
 
 set -u
 
@@ -28,6 +34,7 @@ STATE_DIR="${CODEMONITOR_STATE_DIR:-$HOME/.local/state/codemonitor/sessions}"
 
 state="${1:-running}"
 agent_pid="${2:-$PPID}"
+tool="${CODEMONITOR_TOOL:-claude}"
 
 # Claude passes the hook payload as JSON on stdin.
 input=$(cat 2>/dev/null) || input=""
@@ -38,7 +45,10 @@ json_field() {
         | head -n 1
 }
 
+# Claude puts it at the top level; Codex nests it under `payload` as `id`, and
+# exports no equivalent of CLAUDE_SESSION_ID.
 session_id="${CLAUDE_SESSION_ID:-$(json_field session_id)}"
+[ -n "$session_id" ] || session_id=$(json_field id)
 [ -n "$session_id" ] || exit 0
 
 cwd=$(json_field cwd)
@@ -155,7 +165,7 @@ tmp="$STATE_DIR/.$session_id.$$"
 
 cat > "$tmp" <<EOF
 {
-  "tool": "claude",
+  "tool": "$tool",
   "sessionId": "$session_id",
   "state": "$state",
   "event": "$event",
