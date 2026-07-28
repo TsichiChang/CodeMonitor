@@ -89,6 +89,13 @@ different session. The quantity this app exists to shrink, and the one it can be
 judged by — it is measurable from transcripts alone.
 _Avoid_: Idle time, delay, latency
 
+**Approval wait**:
+The kind of dead wait where a tool is blocked on permission. Worth naming
+separately because it is the kind everyone designs for and the smaller by an
+order of magnitude — a tenth of the time lost here (ADR-0015). The rest is a
+turn that simply ended.
+_Avoid_: Blocked (that is a session state), permission prompt (that is the UI)
+
 ## Display
 
 **Ambient signal**:
