@@ -20,6 +20,9 @@ enum Diagnostics {
                           global shortcut does. Add --dry-run to only show the order.
       --dismiss <text>    Hide an idle session until it does something new.
       --restore           Un-hide everything hidden.
+      --hooks             Show whether the reporting hook is installed per tool.
+      --install-hooks     Install it (backs up each config first).
+      --uninstall-hooks   Remove it, leaving other integrations untouched.
       --selftest          Check the evidence-to-state derivation table.
       --help              Show this message.
 
@@ -28,7 +31,7 @@ enum Diagnostics {
 
   private static let flags: Set<String> = [
     "--diagnose", "--focus", "--focus-next", "--dismiss", "--restore", "--selftest",
-    "--help", "-h",
+    "--hooks", "--install-hooks", "--uninstall-hooks", "--help", "-h",
   ]
 
   /// Whether these arguments select a CLI command rather than the GUI.
@@ -72,12 +75,18 @@ enum Diagnostics {
       await dismiss(matching: arguments[2])
     case "--restore":
       await restore()
+    case "--hooks":
+      reportHooks()
+    case "--install-hooks":
+      changeHooks(installing: true)
+    case "--uninstall-hooks":
+      changeHooks(installing: false)
     case "--selftest":
       print("Evidence derivation")
       let failures = EvidenceChecks.run() + EvidenceChecks.runOrderingChecks()
         + EvidenceChecks.runProcessChecks() + EvidenceChecks.runHostChecks()
         + Metrics.runChecks()
-      let total = EvidenceChecks.count + 2 + 8 + 5 + Metrics.checks.count
+      let total = EvidenceChecks.count + 2 + 9 + 5 + Metrics.checks.count
       print(failures == 0 ? "\nall \(total) checks pass" : "\n\(failures) FAILED")
       exit(failures == 0 ? 0 : 1)
     default:
@@ -126,6 +135,32 @@ enum Diagnostics {
 
     print("→ \(first.project) (\(first.state.rawValue))")
     await monitor.focusNext()
+  }
+
+  private static func reportHooks() {
+    for target in HookInstaller.targets {
+      let state: String
+      switch HookInstaller.status(of: target) {
+      case .installed: state = "installed"
+      case .missing: state = "not installed"
+      case let .partial(present, expected): state = "partial — \(present) of \(expected) events"
+      }
+      print("\(target.tool.label.padding(toLength: 12, withPad: " ", startingAt: 0)) \(state)")
+      print("    \(target.config.path)")
+    }
+  }
+
+  private static func changeHooks(installing: Bool) {
+    for target in HookInstaller.targets {
+      do {
+        let backup = try installing
+          ? HookInstaller.install(target) : HookInstaller.uninstall(target)
+        print("\(installing ? "Installed" : "Removed") for \(target.tool.label)")
+        if let backup { print("    backup: \(backup.lastPathComponent)") }
+      } catch {
+        print("\(target.tool.label): \(error.localizedDescription)")
+      }
+    }
   }
 
   @MainActor

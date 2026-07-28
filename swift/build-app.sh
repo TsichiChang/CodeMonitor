@@ -31,6 +31,10 @@ mkdir -p "${BUNDLE}/Contents/MacOS" "${BUNDLE}/Contents/Resources"
 cp "$BIN" "${BUNDLE}/Contents/MacOS/CodeMonitor"
 cp Resources/Info.plist "${BUNDLE}/Contents/Info.plist"
 cp Resources/AppIcon.icns "${BUNDLE}/Contents/Resources/AppIcon.icns"
+# The hook ships inside the app so it can install itself. Copying from a build
+# tree would tie a working installation to wherever the source happened to sit.
+cp hooks/codemonitor-hook.sh "${BUNDLE}/Contents/Resources/codemonitor-hook.sh"
+chmod +x "${BUNDLE}/Contents/Resources/codemonitor-hook.sh"
 
 # Prefer the identity matching this repo's git email, so a machine with several
 # Development certs picks the developer's own rather than whichever is first.
