@@ -1,30 +1,61 @@
 /// A single session tile.
 ///
+/// One view for both shapes, not two. An idle session is this same tile with
+/// its detail collapsed and its height reduced — because the alternative, a
+/// separate row view swapped in by state, can only ever cross-fade: two
+/// different views in two different containers, tied together by a geometry
+/// match, read as a hand-off rather than as one thing folding shut. Height is
+/// therefore explicit and driven by state, which is the one property SwiftUI
+/// can interpolate cleanly.
+///
 /// Flat and airy: a hairline border, with the background tint following live
 /// state (green while running, amber while waiting) and pulsing ("breathing")
 /// between two tint steps so the state reads at a glance. Waiting breathes
-/// faster than running for urgency. Height is fixed regardless of which
-/// optional fields a session has, so cards in a row line up.
-/// Clicking jumps to the session's terminal.
+/// faster than running for urgency. Clicking jumps to the session's terminal.
 
 import SwiftUI
 
 struct SessionCardView: View {
   let session: SessionInfo
   let onFocus: () -> Void
+  /// Present only for sessions the user is allowed to close — idle ones.
+  var onDismiss: (() -> Void)?
 
   @Environment(\.colorScheme) private var scheme
   @Environment(\.metrics) private var metrics
   @State private var isHovering = false
 
+  private var isIdle: Bool { session.state == .idle }
+
+  /// Height of the detail block when open, stated rather than measured so that
+  /// closing it is an interpolation between two numbers. A natural height
+  /// cannot be animated to zero — and hiding it with opacity alone left the
+  /// space behind, which pushed the header out of a tile clipped to one row.
+  private var detailHeight: Double {
+    metrics.caption * 1.4 + metrics.cardSpacing + metrics.caption * 1.6
+  }
+
+  /// Padding that keeps the header centred in a folded tile, so `idleRowHeight`
+  /// still describes what a collapsed tile measures.
+  private var verticalPadding: Double {
+    isIdle
+      ? max(metrics.cardSpacing * 0.5, (metrics.idleRowHeight - metrics.body * 1.35) / 2)
+      : metrics.cardPadding
+  }
+
   var body: some View {
     Button(action: onFocus) {
-      VStack(alignment: .leading, spacing: metrics.cardSpacing) {
+      VStack(alignment: .leading, spacing: isIdle ? 0 : metrics.cardSpacing) {
         header
-        metaRow
-        statusRow
+        detail
+          // Both the height and the opacity close. The height is what makes it
+          // fold; the opacity keeps text from looking crushed on the way down.
+          .frame(height: isIdle ? 0 : detailHeight, alignment: .top)
+          .opacity(isIdle ? 0 : 1)
+          .clipped()
       }
-      .padding(metrics.cardPadding)
+      .padding(.horizontal, metrics.cardPadding)
+      .padding(.vertical, verticalPadding)
       .frame(maxWidth: .infinity, alignment: .leading)
       .contentShape(Rectangle())
     }
@@ -37,21 +68,70 @@ struct SessionCardView: View {
           lineWidth: metrics.hairline)
     )
     .clipShape(RoundedRectangle(cornerRadius: metrics.cornerRadius))
+    .overlay(alignment: .topTrailing) { dismissButton }
     .onHover { isHovering = $0 }
     .help("Jump to terminal")
   }
 
+  /// Shown on hover only. A tile that is always wearing a close button invites
+  /// being tidied away; this one has to be reached for.
+  @ViewBuilder
+  private var dismissButton: some View {
+    if let onDismiss, isHovering {
+      Button(action: onDismiss) {
+        Image(systemName: "xmark")
+          .font(.system(size: metrics.caption * 0.8, weight: .bold))
+          .foregroundStyle(.secondary)
+          .padding(metrics.caption * 0.4)
+          .background(Circle().fill(.background.opacity(0.75)))
+      }
+      .buttonStyle(.plain)
+      .padding(.top, isIdle ? metrics.caption * 0.5 : metrics.cardPadding * 0.79)
+      .padding(.trailing, metrics.cardPadding * 0.5)
+      .help("Hide until this session does something new")
+      .transition(.opacity)
+    }
+  }
+
+  /// Present in both shapes, so nothing about it moves when the tile folds.
   private var header: some View {
-    HStack(alignment: .firstTextBaseline, spacing: metrics.cardSpacing) {
+    HStack(alignment: .center, spacing: metrics.cardSpacing * 0.7) {
+      Circle()
+        .fill(Palette.statusColor(session.state))
+        .frame(width: metrics.caption * 0.55, height: metrics.caption * 0.55)
+
       Text(session.project)
-        .font(.system(size: metrics.body, weight: .semibold))
+        .font(.system(size: isIdle ? metrics.body * 0.88 : metrics.body,
+                      weight: isIdle ? .regular : .semibold))
+        .foregroundStyle(isIdle ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
         .lineLimit(1)
         .truncationMode(.middle)
+
+      if isIdle, session.subagentCount > 0 {
+        Label("\(session.subagentCount)", systemImage: "circle.hexagongrid")
+          .font(.system(size: metrics.caption * 0.9))
+          .foregroundStyle(.tertiary)
+      }
+
       Spacer(minLength: metrics.cardSpacing * 0.5)
+
       Text(Self.relativeTime(session.lastActivity))
         .font(.system(size: metrics.caption))
         .monospacedDigit()
         .foregroundStyle(.tertiary)
+        // The close button is an overlay in this corner; its width is reserved
+        // whether or not it shows, so the time never jumps sideways on hover.
+        .padding(.trailing, onDismiss == nil ? 0 : metrics.body * 0.9)
+    }
+  }
+
+  /// Everything an idle session does not get. Dropped because of state, not
+  /// because of size — these stay on an active tile even on a small screen,
+  /// and come back the moment the session acts again (ADR-0013).
+  private var detail: some View {
+    VStack(alignment: .leading, spacing: metrics.cardSpacing) {
+      metaRow
+      statusRow
     }
   }
 
@@ -69,7 +149,7 @@ struct SessionCardView: View {
           .lineLimit(1)
       }
     }
-    // Reserve the row even when empty so cards keep a uniform height.
+    // Reserved even when empty so tiles keep a uniform height.
     .frame(height: metrics.caption * 1.4, alignment: .leading)
     .frame(maxWidth: .infinity, alignment: .leading)
   }
@@ -118,7 +198,7 @@ struct SessionCardView: View {
   }
 }
 
-/// Pulses the card background between two tints of the same hue.
+/// Pulses the tile background between two tints of the same hue.
 /// Falls back to a static tint when the system asks for reduced motion.
 private struct BreathingBackground: ViewModifier {
   let session: SessionInfo

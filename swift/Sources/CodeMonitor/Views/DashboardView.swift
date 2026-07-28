@@ -6,19 +6,9 @@ struct DashboardView: View {
   @Environment(SessionMonitor.self) private var monitor
   /// Which screen this window is on decides every length below (ADR-0013).
   @State private var metrics = Metrics()
-  /// Ties a session's row and its card together so one turns into the other
-  /// rather than one vanishing while the other appears.
-  @Namespace private var sessionShape
 
   /// Width available to the cards, measured rather than assumed.
   @State private var contentWidth: CGFloat = 0
-
-  /// Backs up the geometry match when it cannot apply — the two shapes live in
-  /// different containers, and a lazy grid does not always keep a departing
-  /// child around long enough to interpolate it. Without this the fallback is a
-  /// hard cut, which is exactly what the animation exists to avoid.
-  private static let shapeChange: AnyTransition = .scale(scale: 0.94)
-    .combined(with: .opacity)
 
   private var columns: [GridItem] {
     [GridItem(.adaptive(minimum: metrics.minCardWidth), spacing: metrics.gridSpacing,
@@ -101,12 +91,7 @@ struct DashboardView: View {
   }
 
   private func toolGroup(_ tool: ToolKind, items: [SessionInfo]) -> some View {
-    // Spacing is padding rather than stack spacing, and both containers are
-    // always present even when empty. Wrapping either in `if` removed the
-    // container itself the moment its last session changed state, and a
-    // matchedGeometryEffect has nowhere to land when one side is a view that
-    // no longer exists — so the last card going idle jumped instead of moving.
-    VStack(alignment: .leading, spacing: 0) {
+    VStack(alignment: .leading, spacing: metrics.cardSpacing * 1.5) {
       HStack(spacing: metrics.cardSpacing) {
         Image(systemName: tool.symbolName)
           .font(.system(size: metrics.caption))
@@ -121,49 +106,36 @@ struct DashboardView: View {
           .foregroundStyle(.tertiary)
         Divider()
       }
-      .padding(.bottom, metrics.cardSpacing * 1.5)
 
-      // Active sessions get cards; idle ones get a line each, below them. The
-      // split is by state alone, never by how much room is left (ADR-0013).
-      let active = items.filter { $0.state != .idle }
-      let idle = items.filter { $0.state == .idle }
-
+      // One grid, one tile per session, whatever its state. An idle session is
+      // the same tile folded shut — moving it to a second container is what
+      // made the change read as a swap rather than as one thing collapsing.
+      // Sessions arrive sorted by attention, so tiles that are still open sit
+      // above the folded ones without anything here having to arrange that.
       LazyVGrid(columns: columns, spacing: metrics.gridSpacing) {
-        ForEach(active) { session in
-          // Cards carry no close button: only idle sessions may be hidden,
-          // and an idle session is a row (ADR-0007, ADR-0013).
+        ForEach(items) { session in
           SessionCardView(
             session: session,
-            onFocus: { Task { await monitor.focus(session) } }
-          )
-          .matchedGeometryEffect(id: session.id, in: sessionShape)
-          .transition(Self.shapeChange)
-        }
-      }
-      .padding(.bottom, active.isEmpty || idle.isEmpty ? 0 : metrics.gridSpacing)
-
-      VStack(spacing: metrics.gridSpacing * 0.4) {
-        ForEach(idle) { session in
-          IdleRowView(
-            session: session,
             onFocus: { Task { await monitor.focus(session) } },
-            onDismiss: { monitor.dismiss(session) }
+            // Only idle sessions may be hidden. Closing something that is
+            // running, or waiting on you, would hide the two things this
+            // display exists to show (ADR-0007).
+            onDismiss: session.state == .idle ? { monitor.dismiss(session) } : nil
           )
-          .matchedGeometryEffect(id: session.id, in: sessionShape)
-          .transition(Self.shapeChange)
         }
       }
     }
-    // A session waking up grows from its row into a card. This motion is worth
-    // its cost because it *carries* information — that session changed — unlike
-    // the relayout ADR-0013 refuses to animate, which only reports that some
-    // other session appeared. Bound to the state signature so an ordinary scan,
-    // which changes elapsed times every couple of seconds, moves nothing.
+    // A session waking up unfolds its own tile; going idle folds it shut. This
+    // motion earns its cost because it *carries* information — that session
+    // changed — unlike the relayout ADR-0013 refuses to animate, which reports
+    // only that some other session appeared. Bound to the state signature so an
+    // ordinary scan, which changes elapsed times every couple of seconds, moves
+    // nothing at all.
     .animation(.smooth(duration: 0.42), value: monitor.snapshot.stateSignature)
   }
 
   private var counts: some View {
-    HStack(spacing: 6) {
+    HStack(spacing: metrics.caption * 0.6) {
       countBadge(monitor.snapshot.counts.running, "running", Palette.statusRunning)
       countBadge(monitor.snapshot.counts.waiting, "waiting", Palette.statusWaiting)
       countBadge(monitor.snapshot.counts.idle, "idle", nil)
