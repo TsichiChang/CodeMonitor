@@ -42,7 +42,28 @@ enum ProcessScanner {
     (.codex, "codex"), (.opencode, "opencode"), (.claude, "claude"),
   ]
 
-  static func tool(forCommand command: String) -> ToolKind? {
+  /// Interpreters that run an agent as a script, so the name lands one word
+  /// later. Matching stops after these two positions either way.
+  private static let interpreters = ["node", "bun", "deno", "python", "python3", "sh", "zsh", "bash"]
+
+  /// The part of a command line allowed to identify a tool: the executable, and
+  /// the script after it when the executable is an interpreter.
+  ///
+  /// Arguments are excluded, and that is the whole point. Tested against the
+  /// full line, any process merely *mentioning* an agent became one — Claude
+  /// Code's own Bash tool spawns a shell per command, in the session's current
+  /// directory, so `ls /tmp/claude` in this repo minted a card titled `swift`
+  /// that lived as long as the command (ADR-0016).
+  static func identifyingPrefix(of command: String) -> String {
+    let words = command.split(separator: " ", maxSplits: 2, omittingEmptySubsequences: true)
+    guard let first = words.first else { return command }
+    let name = first.split(separator: "/").last.map(String.init) ?? String(first)
+    guard interpreters.contains(name), words.count > 1 else { return String(first) }
+    return "\(first) \(words[1])"
+  }
+
+  static func tool(forCommand fullCommand: String) -> ToolKind? {
+    let command = identifyingPrefix(of: fullCommand)
     // Reject on a literal substring first: almost no process mentions any of
     // these, and `.regularExpression` recompiles its pattern on every call.
     //
