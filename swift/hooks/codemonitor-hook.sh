@@ -39,10 +39,25 @@ tool="${CODEMONITOR_TOOL:-claude}"
 # Claude passes the hook payload as JSON on stdin.
 input=$(cat 2>/dev/null) || input=""
 
+# First `"key": "value"` on stdin, as the value alone.
+#
+# `grep -o` rather than a `sed` substitution, because a substitution has to
+# anchor with a leading `.*` and that is greedy: on
+# `{"id":"a","payload":{"id":"b"}}` it matches the *last* `id` and yields `b`.
+# Codex nests the session under `payload`, so a second `id` anywhere in the
+# payload would have been written out as the session's own — naming the state
+# file after something that is not a session. The real session would then never
+# match its own report (the rollout reader takes the first `id`), and the stray
+# id would mint a phantom card from the hook's cwd, which is the ADR-0016 family
+# arriving by a third route.
+first_string_field() {
+    grep -o "\"$1\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" \
+        | head -n 1 \
+        | sed 's/^"[^"]*"[[:space:]]*:[[:space:]]*"//; s/"$//'
+}
+
 json_field() {
-    printf '%s' "$input" \
-        | sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" \
-        | head -n 1
+    printf '%s' "$input" | first_string_field "$1"
 }
 
 # Claude puts it at the top level; Codex nests it under `payload` as `id`, and
@@ -155,7 +170,7 @@ existing="$STATE_DIR/$session_id.json"
 # the first tool call that follows it.
 carry() {
     [ -f "$existing" ] || return 0
-    sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" "$existing" | head -n 1
+    first_string_field "$1" < "$existing"
 }
 [ -n "$tab_id" ] || tab_id=$(carry tabId)
 [ -n "$pane_id" ] || pane_id=$(carry paneId)
