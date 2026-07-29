@@ -162,6 +162,13 @@ final class SessionMonitor {
     defer { scanning = false }
 
     var fresh = applyDismissals(to: await scanner.scan())
+    // Recorded before withholding, not after: a session held back on its first
+    // sighting has to be in the set the next scan checks against, or it would
+    // be withheld forever.
+    let sighted = Set(fresh.sessions.map(\.id))
+    fresh.sessions = Self.withholdingFirstSightings(
+      fresh.sessions, seenBefore: previouslySeen)
+    previouslySeen = sighted
     markTurnStarts(in: &fresh)
     markUnread(in: &fresh)
     // Sorted again: the scanner ordered these before anything knew what had
@@ -169,6 +176,32 @@ final class SessionMonitor {
     fresh.sessions.sort(by: SessionInfo.inAttentionOrder)
     snapshot = fresh
     band.update(with: snapshot, enabled: ambientBandEnabled)
+    Self.logSnapshot(snapshot)
+  }
+
+  /// Ids the previous scan saw, or nil before the first scan.
+  @ObservationIgnored private var previouslySeen: Set<String>?
+  /// Drops sessions being seen for the first time.
+  ///
+  /// Switching to an old conversation makes a desktop app load several sessions
+  /// for a moment; each fires a hook or touches a transcript, becomes a card,
+  /// and is gone one or two seconds later. Nothing about such a card can be
+  /// acted on in the time it exists — it is motion and nothing else, on a
+  /// display where motion is the expensive thing (ADR-0006).
+  ///
+  /// The cost is that a genuinely new session appears one scan late. That is
+  /// two seconds while anything is running, and it buys the guarantee that
+  /// everything on screen was there long enough to be worth reading.
+  ///
+  /// Nothing is remembered about *why* a session was withheld: it is simply not
+  /// yet in the previous scan's set, which the next scan fixes on its own.
+  nonisolated static func withholdingFirstSightings(
+    _ sessions: [SessionInfo], seenBefore: Set<String>?
+  ) -> [SessionInfo] {
+    // The first scan of a launch has no previous set, and withholding
+    // everything would leave the window empty for a cycle.
+    guard let seenBefore else { return sessions }
+    return sessions.filter { seenBefore.contains($0.id) }
   }
 
   /// Flags idle sessions that have acted since they were last visited.
@@ -187,6 +220,32 @@ final class SessionMonitor {
     if live.count != visits.count {
       visits = live
       HookStateStore.saveVisits(visits)
+    }
+  }
+
+  /// Appends what this scan saw, when `snapshotLog` is set in defaults.
+  ///
+  /// Off by default and diagnostic only. It exists because `--diagnose` cannot
+  /// answer questions about the running app: it is a separate process that
+  /// scans again, so a card that appeared for one cycle is already gone by the
+  /// time it looks. This records the snapshot the display was actually built
+  /// from.
+  private static func logSnapshot(_ snapshot: SessionSnapshot) {
+    guard UserDefaults.standard.bool(forKey: "snapshotLog") else { return }
+    let url = HookStateStore.directory
+      .deletingLastPathComponent().appending(path: "snapshots.log")
+    let stamp = snapshot.generatedAt.formatted(date: .omitted, time: .standard)
+    let rows = snapshot.sessions.map {
+      "\($0.project)|\($0.id)|\($0.evidence.source.rawValue)|\($0.evidence.activity.rawValue)"
+    }
+    let line = "\(stamp) \(rows.joined(separator: "  "))\n"
+    guard let data = line.data(using: .utf8) else { return }
+    if let handle = try? FileHandle(forWritingTo: url) {
+      defer { try? handle.close() }
+      _ = try? handle.seekToEnd()
+      try? handle.write(contentsOf: data)
+    } else {
+      try? data.write(to: url)
     }
   }
 

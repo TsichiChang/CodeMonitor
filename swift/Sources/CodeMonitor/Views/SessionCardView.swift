@@ -38,11 +38,22 @@ struct SessionCardView: View {
     metrics.caption * 1.4 + metrics.cardSpacing + metrics.caption * 1.6
   }
 
+  /// Height of the header row, fixed rather than left to its contents.
+  ///
+  /// The close button is taller than the title's line — a circle of
+  /// `caption × 1.6` against roughly `body × 1.05` of text — so appearing on
+  /// hover made it the tallest thing in the row and pushed the whole tile a
+  /// couple of points taller. On a folded row that reads as a twitch.
+  ///
+  /// It is also what `verticalPadding` had been assuming all along, with
+  /// nothing enforcing it. Stating it once makes the assumption true.
+  private var headerHeight: Double { metrics.body * 1.35 }
+
   /// Padding that keeps the header centred in a folded tile, so `idleRowHeight`
   /// still describes what a collapsed tile measures.
   private var verticalPadding: Double {
     isIdle
-      ? max(metrics.cardSpacing * 0.5, (metrics.idleRowHeight - metrics.body * 1.35) / 2)
+      ? max(metrics.cardSpacing * 0.5, (metrics.idleRowHeight - headerHeight) / 2)
       : metrics.cardPadding
   }
 
@@ -195,6 +206,7 @@ struct SessionCardView: View {
       // makes room.
       dismissButton
     }
+    .frame(height: headerHeight)
   }
 
   /// Everything an idle session does not get. Dropped because of state, not

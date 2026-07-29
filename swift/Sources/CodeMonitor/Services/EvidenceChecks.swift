@@ -291,6 +291,33 @@ enum EvidenceChecks {
     return failures
   }
 
+  /// A session has to be seen twice before it is shown.
+  static func runSightingChecks() -> Int {
+    func s(_ id: String) -> SessionInfo {
+      SessionInfo(
+        id: id, tool: .claude, projectPath: "/tmp/\(id)", workingDirectory: "/tmp/\(id)",
+        project: id, evidence: Evidence(.turnInFlight, at: Date(), source: .reported),
+        state: .running)
+    }
+    var failures = 0
+    func check(_ name: String, _ passed: Bool) {
+      if passed { print("  ✓ \(name)") } else { failures += 1; print("  ✗ \(name)") }
+    }
+
+    check(
+      "the first scan of a launch shows everything",
+      SessionMonitor.withholdingFirstSightings([s("a"), s("b")], seenBefore: nil).count == 2)
+    check(
+      "a session appearing for the first time is held back",
+      SessionMonitor.withholdingFirstSightings([s("a"), s("new")], seenBefore: ["a"])
+        .map(\.id) == ["a"])
+    check(
+      "and shown once it is seen again",
+      SessionMonitor.withholdingFirstSightings([s("a"), s("new")], seenBefore: ["a", "new"])
+        .map(\.id) == ["a", "new"])
+    return failures
+  }
+
   /// Directories that cannot title a card.
   static func runDirectoryChecks() -> Int {
     let home = "/Users/someone"
