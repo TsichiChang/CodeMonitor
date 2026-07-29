@@ -61,6 +61,15 @@ that most deserves attention — longest-waiting first, then running, skipping
 whatever is already frontmost. It is queue consumption, not random access: press
 and arrive, press again for the next one.
 
+"Skipping what is frontmost" is narrower than it sounds, and deliberately so.
+The question can only be answered per *application*: two sessions inside one
+terminal cannot be told apart from outside it, so a frontmost Otty says nothing
+about which of its panes is showing. It is therefore asked only about the
+session jumped to last — where the answer is actionable, because landing back on
+it would look exactly like the key doing nothing — and never used to filter the
+queue. A session the user is sitting in front of but has not been jumped to can
+still be the target.
+
 This is why "which one?" never has to be answered. A selection model would need
 an aiming step, which would need to be shown on screen, which would need a
 visual channel — and colour, brightness, motion and shape are all already spent
@@ -100,9 +109,21 @@ inside it. Grouping is a property of the *brand of agent*, and that is not a
 dimension anyone acts on — nobody deals with their Claude work before their
 Codex work.
 
-So grouping is off by default and each card carries its tool's symbol instead,
+So grouping is off by default and each card carries its tool's mark instead,
 which identifies without reordering. It remains available as a setting, for the
 case where a machine really is being watched one tool at a time.
+
+The mark is the tool's **own application icon**, looked up by bundle identifier,
+rather than a symbol drawn for the purpose: it is already the thing the user
+clicks on every day, so it costs no learning. An SF Symbol stands in where no
+application is installed, which is normal — these are CLIs.
+
+It cannot be shown at full strength, though. An application icon is drawn to win
+a Dock, so placed as-is it becomes the loudest thing on a folded, already-read
+card — and which tool a session belongs to is the one fact about it that never
+changes, which is the definition of what does not deserve attention (ADR-0007).
+Its saturation and opacity therefore follow the card's weight: colour on a live
+card, where everything is meant to be read, and grey once the card folds.
 
 The general form is worth stating, because it will come up again for git branch,
 model, or project: **a grouping is a sort key that outranks every other, so it

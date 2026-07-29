@@ -64,11 +64,43 @@ from the directory, so it reads as the user's account name — which names no
 project, and costs a row on a display where rows are contested (ADR-0006). The
 home directory is therefore excluded here, alongside `/`.
 
-The exclusion is narrow on purpose: it applies only to processes with no session
-behind them. A session that genuinely runs in the home directory has a
-transcript, arrives through its own source, and is unaffected. What is being
-refused is not the directory — it is claiming a session exists on the strength
-of a process that has not yet been given anything to do.
+What is being refused is not the directory — it is claiming a session exists on
+the strength of something that has not yet been given anything to do.
+
+## The exclusion belongs to the rule, not to the path
+
+Two cards titled with the account name appeared again after that fix, and the
+fallback above was not producing them. The *other* path that mints a session
+from a directory was: a hook reports `SessionStart` before the session has any
+transcript, so the session is built out of the hook's own cwd — and that branch
+carried no such condition.
+
+The mechanism is the same restoration seen from the other side. Opening the
+desktop app reloads several conversations at once; each fires `SessionStart`
+while the project is still unchosen, so every one of them reports the home
+folder, and no transcript exists until the first message. Two restored
+conversations, two cards named after the user — which is exactly the "two in a
+row" that was observed.
+
+The fix worth recording is not the missing condition. It is that the condition
+is now **one function used by both paths**. Two places expressing the same rule
+in their own words will drift apart, and this is the proof: the first was
+corrected in isolation and the second went on producing the identical phantom.
+Five assertions pin it, including `/Users/someone/Repos` — inside the home
+folder, and a real project, so it must survive.
+
+A third path is deliberately left alone: a session whose transcript exists and
+whose origin *is* the home folder arrives through its own source and is shown.
+That session is genuinely working there, and the directory is not standing in
+for an identity it lacks. So the exclusion is narrow, but the boundary is
+"minted from a directory alone", not "came from a process".
+
+Honestly marked: this one was not caught in the act. All three paths were clean
+when they were inspected, so the diagnosis is a symptom that fits plus a hole
+that certainly existed in the code — not an observation. The falsifier is
+recorded with it: if the account-name cards return when the desktop app next
+restores several conversations, the source is the third path, and the reasoning
+above is what was wrong.
 
 ## Consequences
 

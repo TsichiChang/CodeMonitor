@@ -26,5 +26,11 @@ session is working, and is worth showing, but nothing is matched on it.
 Process scanning cannot recover a session's UUID. Processes do not hold their
 transcript open, and the UUID in `--resume` argv is the *parent* session for a
 forked session — actively misleading. So a live process can only ever be matched
-to a session heuristically, which is why the snapshot no longer carries a pid
-(see ADR-0003).
+to a session heuristically.
+
+> **The clause that followed this was wrong and has been removed.** It read "…
+> which is why the snapshot no longer carries a pid (see ADR-0003)", and both
+> halves have since inverted: ADR-0003 reversed itself — process state is read
+> on every scan — and a session does carry a pid. The reversal does not touch
+> the rule above. A pid is a decoration and a lifetime signal; the heuristic is
+> confined to *attaching* one, and never decides what a session is.

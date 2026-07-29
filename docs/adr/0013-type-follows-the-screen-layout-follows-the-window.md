@@ -71,6 +71,14 @@ arithmetic one. It starts at 0.4 of a card and gets looked at.
 
 ## Viewing distance is not measurable, so it is asked once
 
+> **Half of this is unbuilt, and was never built.** Point density is read from
+> the EDID and drives the body size, as described. The manual offset does not
+> exist: no screen keeps one, nothing asks for one, and there is no per-display
+> record to keep it in. Nothing has forced the issue, because the default has
+> been right on both screens this machine has — and the tier where it would
+> first matter is the one that cannot be checked yet (see the last consequence
+> below). It is recorded here as owed, not as done.
+
 Physical size alone does not settle type size; what the eye resolves is physical
 size over viewing distance. A 7" panel across the desk is further away than a
 16" laptop screen, so it is not simply "small screen, small type" — that panel

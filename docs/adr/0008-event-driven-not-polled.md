@@ -35,9 +35,15 @@ This is both cheaper and faster than polling: idle cost approaches zero, and a
 change is seen in under a second instead of up to two.
 
 Writes are bursty — median 1.41s apart, but 9.3% land within 100ms of the
-previous one — so events must be coalesced. The file-system event stream's own
-latency parameter does this in the kernel; a debounce in application code is not
-needed.
+previous one — so events must be coalesced.
+
+> **The mechanism named here was never the one built.** This said the
+> file-system event stream's own latency parameter coalesces in the kernel, so
+> no application-level debounce is needed. `FSEventStream` was never used. What
+> the surviving half of this ADR runs on is a `DispatchSource` file-system
+> object source on the state directory, which has no latency parameter, so the
+> coalescing is an 80ms debounce in application code after all. The measurement
+> above is what sizes it; only the claim about where it happens was wrong.
 
 Incremental parsing was considered and rejected. Once the process scan and the
 regex recompilation are gone, a full rescan is a few milliseconds, and at the
