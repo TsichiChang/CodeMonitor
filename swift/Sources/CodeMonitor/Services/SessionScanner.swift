@@ -224,8 +224,18 @@ actor SessionScanner {
     let covered = Set(sessions.map { "\($0.tool.rawValue):\($0.projectPath)" })
     var emitted = Set<String>()
 
+    let home = FileManager.default.homeDirectoryForCurrentUser.path
     return processes.compactMap { process -> SessionInfo? in
       guard let cwd = process.cwd, cwd != "/" else { return nil }
+      // The home directory is where an agent sits before a project is chosen —
+      // a desktop app launches there and stays until the user picks one. This
+      // fallback exists for an agent that has started and not yet written its
+      // first record, and that description fits, but there is nothing to show:
+      // the card would be titled with the user's own name, which names no
+      // project and costs a row on a display where rows are contested
+      // (ADR-0006). A session that genuinely runs in the home directory still
+      // appears — it has a transcript, and comes through its source instead.
+      guard cwd != home else { return nil }
       let key = "\(process.tool.rawValue):\(cwd)"
       guard !covered.contains(key), emitted.insert(key).inserted else { return nil }
 

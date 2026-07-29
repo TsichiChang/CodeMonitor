@@ -52,6 +52,24 @@ cannot be fixed by keying on the UUID, because a bare process has no UUID to
 key on — which is the honest reason this fallback exists at all, and the reason
 it must be conservative about what it claims to have found.
 
+## The same restraint applies to where it is running
+
+A second phantom appeared later, titled with the user's own name and gone within
+a minute. It came from the same fallback, correctly identifying a real agent
+this time: a desktop app launches its process before a project is chosen, so the
+working directory sits at the home folder until the user picks one.
+
+That is a real agent, but there is nothing to show for it. The card is titled
+from the directory, so it reads as the user's account name — which names no
+project, and costs a row on a display where rows are contested (ADR-0006). The
+home directory is therefore excluded here, alongside `/`.
+
+The exclusion is narrow on purpose: it applies only to processes with no session
+behind them. A session that genuinely runs in the home directory has a
+transcript, arrives through its own source, and is unaffected. What is being
+refused is not the directory — it is claiming a session exists on the strength
+of a process that has not yet been given anything to do.
+
 ## Consequences
 
 Fewer phantom cards, and a real risk of the opposite: an agent launched in a way
