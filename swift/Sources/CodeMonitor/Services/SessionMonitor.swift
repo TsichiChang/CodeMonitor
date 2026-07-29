@@ -212,7 +212,8 @@ final class SessionMonitor {
     for index in snapshot.sessions.indices {
       let session = snapshot.sessions[index]
       snapshot.sessions[index].isUnread =
-        session.state == .idle && session.lastActivity > (visits[session.id] ?? .distantPast)
+        session.state == .idle && session.evidence.mayLeaveSomethingUnread
+        && session.lastActivity > (visits[session.id] ?? .distantPast)
     }
 
     let kept = Self.retainedVisits(visits, now: Date())

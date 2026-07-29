@@ -19,7 +19,26 @@ carrying two opposite meanings on its own.
 
 There is no read flag. A session is unread when `lastActivity > lastVisited`,
 from two observations that are recorded anyway: when it last acted, and when it
-was last jumped to. A stored flag would need something to clear it, and every
+was last jumped to.
+
+> **A third condition was missing, and `/clear` found it.** The formula says
+> *seen*, and takes *finished* for granted — but idle is reached by more than one
+> road. `SessionStart` derives to idle too, correctly, because a session that has
+> just been opened is not working. It is also not finished: nothing has happened
+> in it at all.
+>
+> `/clear` and `/compact` both report `SessionStart`. So typing either one minted
+> a blue card, for a session the user was sitting in front of at that exact
+> moment, with no output to read — and, being the newest thing on screen, it
+> sorted ahead of every session that really was unread and the shortcut stopped
+> there first. The title of this ADR is *finished work stays until it is seen*;
+> this was unfinished work asking to be seen.
+>
+> Unread now also requires that the evidence could have left something behind,
+> which is everything except `opened`. The ambiguous cases stay in — a turn that
+> stalled and aged out, or a store that reports only a timestamp, may or may not
+> have produced something, and this ADR exists because *hiding* finished work is
+> the more expensive mistake. A stored flag would need something to clear it, and every
 "something" is a place that can forget — leaving a session marked read after it
 has spoken again. Deriving it means a session that acts once more becomes unread
 by itself, with nothing to reset (ADR-0012).
