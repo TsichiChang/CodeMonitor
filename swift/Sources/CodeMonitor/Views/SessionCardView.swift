@@ -122,6 +122,14 @@ struct SessionCardView: View {
         .fill(session.isUnread ? Palette.statusUnread : Palette.statusColor(session.state))
         .frame(width: metrics.caption * 0.55, height: metrics.caption * 0.55)
 
+      // Which tool this is, on the card rather than in a group header. Grouping
+      // by tool sorted brand above urgency — a waiting Codex session sat below
+      // every read Claude one — so the tool has to be legible without it.
+      Image(systemName: session.tool.symbolName)
+        .font(.system(size: metrics.caption * 0.95))
+        .foregroundStyle(.tertiary)
+        .help(session.tool.label)
+
       Text(session.project)
         .font(.system(size: isIdle ? metrics.body * 0.88 : metrics.body,
                       weight: isIdle ? .regular : .semibold))

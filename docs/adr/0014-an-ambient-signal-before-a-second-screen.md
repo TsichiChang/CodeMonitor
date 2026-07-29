@@ -91,6 +91,24 @@ notifications, which ADR-0006 rejected on the grounds that the display is
 already in view. The overlay is what makes that premise true without buying
 anything.
 
+## Nothing sorts above attention
+
+The dashboard grouped sessions by tool, which quietly repealed all of this: a
+Codex session blocked on a permission prompt sat below every Claude Code session
+that had already been read, because the group header outranked the ordering
+inside it. Grouping is a property of the *brand of agent*, and that is not a
+dimension anyone acts on — nobody deals with their Claude work before their
+Codex work.
+
+So grouping is off by default and each card carries its tool's symbol instead,
+which identifies without reordering. It remains available as a setting, for the
+case where a machine really is being watched one tool at a time.
+
+The general form is worth stating, because it will come up again for git branch,
+model, or project: **a grouping is a sort key that outranks every other, so it
+has to earn that rank.** Attention has earned it — it is the thing this display
+exists to allocate. Identity belongs on the card.
+
 ## Consequences
 
 ADR-0006's claim stands: designed for peripheral vision, no notifications,

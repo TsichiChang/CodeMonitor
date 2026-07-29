@@ -1,4 +1,4 @@
-/// The dashboard window: every detected session, grouped by tool.
+/// The dashboard window: every detected session, in attention order.
 
 import SwiftUI
 
@@ -9,6 +9,10 @@ struct DashboardView: View {
 
   /// Width available to the cards, measured rather than assumed.
   @State private var contentWidth: CGFloat = 0
+  /// Off by default: grouping sorts by which tool, above how urgent, so a
+  /// waiting Codex session sat below every read Claude one. The tool is on the
+  /// card instead, where it identifies without reordering (ADR-0014).
+  @AppStorage("groupByTool") private var groupByTool = false
 
   private var columns: [GridItem] {
     [GridItem(.adaptive(minimum: metrics.minCardWidth), spacing: metrics.gridSpacing,
@@ -81,8 +85,12 @@ struct DashboardView: View {
   private var sessionList: some View {
     ScrollView {
       VStack(alignment: .leading, spacing: metrics.groupSpacing) {
-        ForEach(monitor.snapshot.groupedByTool, id: \.tool) { group in
-          toolGroup(group.tool, items: group.items)
+        if groupByTool {
+          ForEach(monitor.snapshot.groupedByTool, id: \.tool) { group in
+            toolGroup(group.tool, items: group.items)
+          }
+        } else {
+          grid(monitor.snapshot.sessions)
         }
       }
       .padding(.horizontal, metrics.edgePadding)
@@ -107,22 +115,26 @@ struct DashboardView: View {
         Divider()
       }
 
-      // One grid, one tile per session, whatever its state. An idle session is
-      // the same tile folded shut — moving it to a second container is what
-      // made the change read as a swap rather than as one thing collapsing.
-      // Sessions arrive sorted by attention, so tiles that are still open sit
-      // above the folded ones without anything here having to arrange that.
-      LazyVGrid(columns: columns, spacing: metrics.gridSpacing) {
-        ForEach(items) { session in
-          SessionCardView(
-            session: session,
-            onFocus: { Task { await monitor.focus(session) } },
-            // Only idle sessions may be hidden. Closing something that is
-            // running, or waiting on you, would hide the two things this
-            // display exists to show (ADR-0007).
-            onDismiss: session.state == .idle ? { monitor.dismiss(session) } : nil
-          )
-        }
+      grid(items)
+    }
+  }
+
+  /// One grid, one tile per session, whatever its state. An idle session is the
+  /// same tile folded shut — moving it to a second container is what made the
+  /// change read as a swap rather than as one thing collapsing. Sessions arrive
+  /// sorted by attention, so tiles that are still open sit above the folded ones
+  /// without anything here having to arrange that.
+  private func grid(_ items: [SessionInfo]) -> some View {
+    LazyVGrid(columns: columns, spacing: metrics.gridSpacing) {
+      ForEach(items) { session in
+        SessionCardView(
+          session: session,
+          onFocus: { Task { await monitor.focus(session) } },
+          // Only idle sessions may be hidden. Closing something that is running,
+          // or waiting on you, would hide the two things this display exists to
+          // show (ADR-0007).
+          onDismiss: session.state == .idle ? { monitor.dismiss(session) } : nil
+        )
       }
     }
     // A session waking up unfolds its own tile; going idle folds it shut. This

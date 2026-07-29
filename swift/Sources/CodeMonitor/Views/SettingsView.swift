@@ -31,6 +31,7 @@ struct SettingsView: View {
   @AppStorage("appearance") private var appearance = Appearance.system
   @AppStorage("showDelegatedSessions") private var showDelegated = false
   @AppStorage("ambientBand") private var ambientBand = true
+  @AppStorage("groupByTool") private var groupByTool = false
   @State private var interval: Double = 2
   @State private var hookStatus: [ToolKind: HookInstaller.Status] = [:]
   @State private var hookNote: String?
@@ -48,6 +49,12 @@ struct SettingsView: View {
         .help(
           "Agents started by a program get one card each instead of being counted "
             + "on the session that spawned them.")
+
+      Toggle("Group by tool", isOn: $groupByTool)
+        .help(
+          "Off by default: grouping puts every Claude Code session above every "
+            + "Codex one, however urgent. Each card carries its tool's symbol, so "
+            + "they stay told apart without it.")
 
       Toggle("Glow at the screen edge while waiting", isOn: $ambientBand)
         .help(
