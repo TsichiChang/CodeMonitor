@@ -29,6 +29,20 @@ Jumping is the only thing that counts as reading, and there is no separate
 the meaning it would carry — "I am not going back to this" — is what dismissing
 already says.
 
+> **Widened: arriving counts, however you arrive.** The first sentence was too
+> narrow, and it stayed unnoticed because it is true of the only arrival this
+> app can *initiate*. Almost every real arrival is the user's own — ⌘1, a click
+> on a tab, ⌘⇧[ — and none of those reach here. So a session read by switching
+> to its tab stayed unread forever: blue, sorted above sessions actually
+> unread, and still in the shortcut's queue, which turns queue consumption back
+> into the random access ADR-0014 built it to replace.
+>
+> Being able to see a session now also records a visit. The paragraph above is
+> untouched by that — unread is still derived from `lastActivity > lastVisited`,
+> and what grows is only the set of observations that move `lastVisited`. There
+> is still no flag, so there is still nothing that can forget to clear one.
+> ADR-0022 has the predicate and what it costs to ask.
+
 ## A fourth colour, which is why it is allowed
 
 ADR-0007 gives colour to state, and green, amber and grey account for running,
