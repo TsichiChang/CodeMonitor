@@ -63,6 +63,7 @@ struct SessionCardView: View {
       .contentShape(Rectangle())
     }
     .buttonStyle(.plain)
+    .animation(.smooth(duration: 0.18), value: isHovering)
     .modifier(BreathingBackground(session: session, scheme: scheme))
     .overlay(
       RoundedRectangle(cornerRadius: metrics.cornerRadius)
@@ -71,10 +72,12 @@ struct SessionCardView: View {
           lineWidth: metrics.hairline)
     )
     .clipShape(RoundedRectangle(cornerRadius: metrics.cornerRadius))
-    .overlay(alignment: .topTrailing) { dismissButton }
     .onHover { isHovering = $0 }
     .help("Jump to terminal")
   }
+
+  /// True while the close button is standing in for the elapsed time.
+  private var isDismissHovering: Bool { isHovering && onDismiss != nil }
 
   /// Shown on hover only. A tile that is always wearing a close button invites
   /// being tidied away; this one has to be reached for.
@@ -85,14 +88,12 @@ struct SessionCardView: View {
         Image(systemName: "xmark")
           .font(.system(size: metrics.caption * 0.8, weight: .bold))
           .foregroundStyle(.secondary)
-          .padding(metrics.caption * 0.4)
+          .frame(width: dismissWidth, height: dismissWidth)
           .background(Circle().fill(.background.opacity(0.75)))
       }
       .buttonStyle(.plain)
-      .padding(.top, isIdle ? metrics.caption * 0.5 : metrics.cardPadding * 0.79)
-      .padding(.trailing, metrics.cardPadding * 0.5)
       .help("Hide until this session does something new")
-      .transition(.opacity)
+      .transition(.opacity.combined(with: .scale(scale: 0.7)))
     }
   }
 
@@ -108,12 +109,40 @@ struct SessionCardView: View {
     Self.relativeTime(session.stateSince ?? session.lastActivity, now: now)
   }
 
+  /// Width the close button occupies, and therefore the width the elapsed time
+  /// keeps clear of it. Derived rather than guessed twice: the button is its
+  /// glyph plus padding on both sides, and the previous reservation was smaller
+  /// than that, so the button sat on top of the time it was meant to avoid.
+  private var dismissWidth: Double { metrics.caption * 1.6 }
+
   /// How often the age re-reads the clock. Five seconds is finer than any
   /// number it displays — the smallest unit shown is a second, and below a
   /// minute a five-second step is not something a glance resolves — while
   /// staying far cheaper than a per-second redraw on a display where motion is
   /// the expensive thing (ADR-0006).
   private static let tick: TimeInterval = 5
+
+  @ViewBuilder
+  private var toolMark: some View {
+    if let icon = ToolIcon.image(for: session.tool) {
+      // Colour follows the tile's weight rather than being fixed. An
+      // application icon is drawn to win a Dock, so on a folded, finished
+      // session it would be the loudest thing on it — and which tool a session
+      // belongs to is the one fact about it that never changes (ADR-0007). A
+      // live tile earns the colour back: everything on it is meant to be read.
+      Image(nsImage: icon)
+        .resizable()
+        .interpolation(.high)
+        .aspectRatio(contentMode: .fit)
+        .saturation(isIdle ? 0 : 1)
+        .opacity(isIdle ? 0.5 : 1)
+    } else {
+      // No application installed — the CLIs run without one.
+      Image(systemName: session.tool.symbolName)
+        .font(.system(size: metrics.caption * 0.95))
+        .foregroundStyle(isIdle ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.secondary))
+    }
+  }
 
   /// Present in both shapes, so nothing about it moves when the tile folds.
   private var header: some View {
@@ -124,10 +153,11 @@ struct SessionCardView: View {
 
       // Which tool this is, on the card rather than in a group header. Grouping
       // by tool sorted brand above urgency — a waiting Codex session sat below
-      // every read Claude one — so the tool has to be legible without it.
-      Image(systemName: session.tool.symbolName)
-        .font(.system(size: metrics.caption * 0.95))
-        .foregroundStyle(.tertiary)
+      // every read Claude one — so the tool has to be legible without it
+      // (ADR-0014). The application's own icon rather than a symbol: it is
+      // already what the user clicks on, so it needs no learning.
+      toolMark
+        .frame(width: metrics.body * 0.85, height: metrics.body * 0.85)
         .help(session.tool.label)
 
       Text(session.project)
@@ -156,9 +186,14 @@ struct SessionCardView: View {
           .monospacedDigit()
           .foregroundStyle(.tertiary)
       }
-        // The close button is an overlay in this corner; its width is reserved
-        // whether or not it shows, so the time never jumps sideways on hover.
-        .padding(.trailing, onDismiss == nil ? 0 : metrics.body * 0.9)
+
+      // In the row rather than floating over it. As an overlay the button could
+      // neither push the time aside nor sit level with the title — its vertical
+      // position was a padding guess, correct at one row height and wrong at
+      // every other, which is every other screen (ADR-0013). Laid out here, the
+      // stack's own alignment centres it against the title, and the time simply
+      // makes room.
+      dismissButton
     }
   }
 

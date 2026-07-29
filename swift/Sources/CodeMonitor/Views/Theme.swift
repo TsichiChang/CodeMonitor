@@ -74,7 +74,9 @@ enum Palette {
     switch state {
     case .running: statusRunning
     case .waiting: statusWaiting
-    case .idle: .secondary
+    // Dimmer than secondary text. Idle is the state with the least to say, and
+    // the dot is there mainly so the row keeps its shape (ADR-0007).
+    case .idle: .secondary.opacity(0.45)
     }
   }
 }

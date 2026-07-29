@@ -16,7 +16,19 @@ enum ToolKind: String, Sendable, CaseIterable, Hashable {
     }
   }
 
-  /// SF Symbol used in group headers and the menu bar.
+  /// Applications that host this tool, best match first. Used to show the
+  /// tool's own icon on a card — a symbol has to be learned, whereas the icon
+  /// is the one the user already clicks on.
+  var bundleIdentifiers: [String] {
+    switch self {
+    case .claude: ["com.anthropic.claudefordesktop", "com.anthropic.claude"]
+    case .codex: ["com.openai.codex", "com.openai.chat"]
+    case .opencode: ["dev.opencode.app", "com.opencode.opencode"]
+    }
+  }
+
+  /// SF Symbol used in group headers and the menu bar. Also the fallback where
+  /// no application is installed — the CLIs run without one.
   var symbolName: String {
     switch self {
     case .claude: "brain"

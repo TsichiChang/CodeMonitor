@@ -8,14 +8,12 @@ struct StatusPill: View {
   @Environment(\.metrics) private var metrics
 
   var body: some View {
-    HStack(spacing: metrics.caption * 0.4) {
-      Circle()
-        .fill(Palette.statusColor(state))
-        .frame(width: metrics.caption * 0.6, height: metrics.caption * 0.6)
-      Text(state.label)
-        .font(.system(size: metrics.caption, weight: .medium))
-        .foregroundStyle(.secondary)
-    }
-    .fixedSize()
+    // Text alone. The colour is said twice over already — by the dot beside the
+    // project name, and by the card's own background, which *is* the state
+    // tint. A third copy of it here was the same fact competing with itself.
+    Text(state.label)
+      .font(.system(size: metrics.caption, weight: .medium))
+      .foregroundStyle(.secondary)
+      .fixedSize()
   }
 }
