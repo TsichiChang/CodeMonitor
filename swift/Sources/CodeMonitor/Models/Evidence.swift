@@ -133,6 +133,22 @@ extension Evidence {
     }
   }
 
+  /// Whether this session could have left anything a person is behind on.
+  ///
+  /// Unread means *finished work nobody has looked at* (ADR-0018), and `opened`
+  /// is the one activity that says the opposite outright: the session exists and
+  /// nothing has happened in it yet. Both `/clear` and `/compact` report
+  /// `SessionStart`, so both minted a blue card — for a session the user was
+  /// sitting in front of at that exact moment, with no output to read. Being the
+  /// newest thing on screen, it then outranked every session that really was
+  /// unread, and the shortcut stopped there first.
+  ///
+  /// Everything else counts, including the ambiguous cases. A turn that stalled
+  /// and aged out, or a store that offers only a timestamp, may or may not have
+  /// left something worth reading — and ADR-0018 exists because *hiding*
+  /// finished work is the more expensive mistake, so they stay in.
+  var mayLeaveSomethingUnread: Bool { activity != .opened }
+
   /// Whether the session still belongs on screen (ADR-0005).
   func isCurrent(now: Date) -> Bool {
     let age = now.timeIntervalSince(at)

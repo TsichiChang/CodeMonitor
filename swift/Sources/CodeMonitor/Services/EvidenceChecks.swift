@@ -373,6 +373,39 @@ enum EvidenceChecks {
     return failures
   }
 
+  /// Which evidence can leave something unread.
+  ///
+  /// `/clear` and `/compact` both report `SessionStart`, and a session that has
+  /// only been opened went straight to idle-and-unread: a blue card, newest on
+  /// screen so ahead of every genuinely unread session, for a session the user
+  /// was sitting in front of when they typed the command.
+  static func runUnreadChecks() -> Int {
+    var failures = 0
+    func check(_ name: String, _ passed: Bool) {
+      if passed { print("  ✓ \(name)") } else { failures += 1; print("  ✗ \(name)") }
+    }
+    func evidence(_ activity: Activity, _ source: EvidenceSource = .reported) -> Evidence {
+      Evidence(activity, at: Date(), source: source)
+    }
+
+    check(
+      "a session that has only been opened has nothing to be behind on",
+      !evidence(.opened).mayLeaveSomethingUnread)
+    check(
+      "a finished turn does",
+      evidence(.turnComplete).mayLeaveSomethingUnread)
+    check(
+      // OpenCode's store gives a timestamp and nothing else. It may or may not
+      // have left something; ADR-0018 says hiding finished work is the worse
+      // error, so the ambiguous case counts.
+      "a store that says only that something changed still counts",
+      evidence(.unknown, .inferred).mayLeaveSomethingUnread)
+    check(
+      "so does a turn that stalled and aged out",
+      evidence(.turnInFlight, .inferred).mayLeaveSomethingUnread)
+    return failures
+  }
+
   /// A visit is forgotten by age, never because a scan missed its session.
   ///
   /// ADR-0021 guarantees a returning session is absent for at least one scan,

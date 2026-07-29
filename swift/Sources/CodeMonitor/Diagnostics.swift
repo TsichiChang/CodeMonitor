@@ -87,8 +87,9 @@ enum Diagnostics {
         + EvidenceChecks.runProcessChecks() + EvidenceChecks.runHostChecks()
         + EvidenceChecks.runGrantChecks() + EvidenceChecks.runDirectoryChecks()
         + EvidenceChecks.runHookMergeChecks() + EvidenceChecks.runSightingChecks()
-        + EvidenceChecks.runVisitChecks() + Metrics.runChecks()
-      let total = EvidenceChecks.count + 5 + 9 + 5 + 4 + 5 + 5 + 3 + 2
+        + EvidenceChecks.runVisitChecks() + EvidenceChecks.runUnreadChecks()
+        + Metrics.runChecks()
+      let total = EvidenceChecks.count + 5 + 9 + 5 + 4 + 5 + 5 + 3 + 2 + 4
         + Metrics.checks.count
       print(failures == 0 ? "\nall \(total) checks pass" : "\n\(failures) FAILED")
       exit(failures == 0 ? 0 : 1)
@@ -239,7 +240,14 @@ enum Diagnostics {
 
     for session in snapshot.sessions {
       let origin = session.evidence.source.rawValue
-      print("• \(session.project)  [\(session.tool.rawValue)]  \(session.state.rawValue) (\(origin))")
+      // Unread decides a card's colour, which band it sorts into and whether the
+      // shortcut stops there, and it was the one derived value this could not
+      // show — so a session wrongly marked unread had to be diagnosed by
+      // reading the source rather than by looking.
+      let unread = session.isUnread ? " · unread" : ""
+      print(
+        "• \(session.project)  [\(session.tool.rawValue)]  "
+          + "\(session.state.rawValue)\(unread) (\(origin))")
       print("    evidence: \(session.evidence.activity.rawValue), liveness \(session.evidence.liveness.rawValue)")
       if session.subagentCount > 0 { print("    sub-agents: \(session.subagentCount) running") }
       if let tab = session.tabID { print("    tab:   \(tab)") }
