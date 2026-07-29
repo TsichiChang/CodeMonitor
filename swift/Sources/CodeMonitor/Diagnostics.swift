@@ -85,9 +85,9 @@ enum Diagnostics {
       print("Evidence derivation")
       let failures = EvidenceChecks.run() + EvidenceChecks.runOrderingChecks()
         + EvidenceChecks.runProcessChecks() + EvidenceChecks.runHostChecks()
-        + EvidenceChecks.runGrantChecks()
+        + EvidenceChecks.runGrantChecks() + EvidenceChecks.runDirectoryChecks()
         + Metrics.runChecks()
-      let total = EvidenceChecks.count + 5 + 9 + 5 + 4 + Metrics.checks.count
+      let total = EvidenceChecks.count + 5 + 9 + 5 + 4 + 5 + Metrics.checks.count
       print(failures == 0 ? "\nall \(total) checks pass" : "\n\(failures) FAILED")
       exit(failures == 0 ? 0 : 1)
     default:

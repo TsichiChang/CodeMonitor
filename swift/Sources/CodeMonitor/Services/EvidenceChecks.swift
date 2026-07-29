@@ -291,6 +291,28 @@ enum EvidenceChecks {
     return failures
   }
 
+  /// Directories that cannot title a card.
+  static func runDirectoryChecks() -> Int {
+    let home = "/Users/someone"
+    let cases: [(String, String, Bool)] = [
+      ("a project directory names one", "/Users/someone/Repos/thing", false),
+      ("the home folder does not", home, true),
+      ("nor does the root", "/", true),
+      ("nor does nothing at all", "", true),
+      ("a directory inside home still does", "/Users/someone/Repos", false),
+    ]
+    var failures = 0
+    for (name, path, expected) in cases {
+      if SessionScanner.namesNoProject(path, home: home) == expected {
+        print("  ✓ \(name)")
+      } else {
+        failures += 1
+        print("  ✗ \(name)")
+      }
+    }
+    return failures
+  }
+
   /// A permission prompt is only still a prompt until something starts running.
   static func runGrantChecks() -> Int {
     let now = Date()
