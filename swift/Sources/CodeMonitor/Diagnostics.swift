@@ -87,7 +87,7 @@ enum Diagnostics {
         + EvidenceChecks.runProcessChecks() + EvidenceChecks.runHostChecks()
         + EvidenceChecks.runGrantChecks()
         + Metrics.runChecks()
-      let total = EvidenceChecks.count + 3 + 9 + 5 + 4 + Metrics.checks.count
+      let total = EvidenceChecks.count + 5 + 9 + 5 + 4 + Metrics.checks.count
       print(failures == 0 ? "\nall \(total) checks pass" : "\n\(failures) FAILED")
       exit(failures == 0 ? 0 : 1)
     default:

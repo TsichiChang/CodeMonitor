@@ -192,6 +192,24 @@ enum EvidenceChecks {
       "unseen idle outranks idle already read, however old",
       banded.map(\.project) == ["idle-unread", "idle-seen"])
 
+    // Reading one idle session must not disturb the order of the others.
+    func idle(_ name: String, ago: TimeInterval, unread: Bool) -> SessionInfo {
+      var s = session(name, .idle, agoSeconds: ago)
+      s.isUnread = unread
+      return s
+    }
+    let beforeRead = [idle("a", ago: 30, unread: true),
+                      idle("b", ago: 60, unread: true),
+                      idle("c", ago: 90, unread: true)]
+      .sorted(by: SessionInfo.inAttentionOrder).map(\.project)
+    check("unread idle sessions run newest first", beforeRead == ["a", "b", "c"])
+
+    let afterRead = [idle("a", ago: 30, unread: true),
+                     idle("b", ago: 60, unread: false),   // the one just visited
+                     idle("c", ago: 90, unread: true)]
+      .sorted(by: SessionInfo.inAttentionOrder).map(\.project)
+    check("reading the middle one drops it below the rest", afterRead == ["a", "c", "b"])
+
     let mixed = [session("idle-old", .idle, agoSeconds: 600),
                  session("running", .running, agoSeconds: 300),
                  session("waiting-new", .waiting, agoSeconds: 10),
