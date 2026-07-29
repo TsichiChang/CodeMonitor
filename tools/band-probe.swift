@@ -26,33 +26,54 @@ let AMBER = (r: 1.0, g: 0.60, b: 0.15)
 let ALPHA = (low: 0.10, high: 0.72)
 let HEIGHT = (low: 12.0, high: 40.0)   // peak capped: past ~40 it covers an editor's last line
 let PERIOD = 1.2                        // seconds per full breath
-let FPS = 30.0
 
+// The band is a CAGradientLayer built once at its tallest and brightest; the
+// breath is a fraction of that, animated by Core Animation in the render
+// server. It was a 30fps timer redrawing a gradient into a screen-sized view,
+// which this probe measured at 11.5% of a core — nearly twice what the poll
+// ADR-0008 replaced used to cost, and 165× the dashboard's own breathing cards,
+// which were on the compositor all along.
+//
+// Both the tint and the edge itself move. A swing that is unmistakable side by
+// side is nearly invisible spread across a 1.2s fade (Theme.swift says the same
+// about card tints), and peripheral vision answers to a moving boundary long
+// before a changing brightness (ADR-0006).
 final class BandView: NSView {
-  var phase: CGFloat = 0
+  private let glow = CAGradientLayer()
 
-  override func draw(_ dirty: NSRect) {
-    guard let ctx = NSGraphicsContext.current?.cgContext else { return }
-    let breath = 0.5 + 0.5 * sin(phase)
+  override init(frame frameRect: NSRect) {
+    super.init(frame: frameRect)
+    wantsLayer = true
+    layerContentsRedrawPolicy = .never
 
-    // Both the tint and the edge itself move. A swing that is unmistakable side
-    // by side is nearly invisible spread across a 1.2s fade (Theme.swift says
-    // the same about card tints), and peripheral vision answers to a moving
-    // boundary long before a changing brightness (ADR-0006).
-    let alpha = ALPHA.low + (ALPHA.high - ALPHA.low) * breath
-    let h = HEIGHT.low + (HEIGHT.high - HEIGHT.low) * breath
+    let amber = NSColor(srgbRed: AMBER.r, green: AMBER.g, blue: AMBER.b, alpha: 1)
+    glow.colors = [amber.cgColor, amber.withAlphaComponent(0).cgColor]
+    glow.startPoint = CGPoint(x: 0.5, y: 0)   // unflipped: the bottom edge
+    glow.endPoint = CGPoint(x: 0.5, y: 1)
+    glow.anchorPoint = CGPoint(x: 0.5, y: 0)  // grows upward from the edge
+    glow.bounds = CGRect(x: 0, y: 0, width: frameRect.width, height: HEIGHT.high)
+    glow.position = CGPoint(x: frameRect.midX, y: 0)
+    layer?.addSublayer(glow)
 
-    let amber = NSColor(srgbRed: AMBER.r, green: AMBER.g, blue: AMBER.b, alpha: alpha).cgColor
-    guard let grad = CGGradient(
-      colorsSpace: CGColorSpace(name: CGColorSpace.sRGB)!,
-      colors: [amber, amber.copy(alpha: 0)!] as CFArray,
-      locations: [0, 1]) else { return }
-
-    ctx.saveGState()
-    ctx.clip(to: CGRect(x: 0, y: 0, width: bounds.width, height: h))
-    ctx.drawLinearGradient(grad, start: .zero, end: CGPoint(x: 0, y: h), options: [])
-    ctx.restoreGState()
+    func pulse(_ keyPath: String, _ from: CGFloat, _ to: CGFloat) -> CABasicAnimation {
+      let a = CABasicAnimation(keyPath: keyPath)
+      a.fromValue = from
+      a.toValue = to
+      a.duration = PERIOD / 2          // autoreversing makes a cycle of two passes
+      a.autoreverses = true
+      a.repeatCount = .infinity
+      a.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+      return a
+    }
+    glow.opacity = Float(ALPHA.low / ALPHA.high)
+    glow.transform = CATransform3DMakeScale(1, HEIGHT.low / HEIGHT.high, 1)
+    glow.add(pulse("opacity", ALPHA.low / ALPHA.high, 1), forKey: "alpha")
+    glow.add(
+      pulse("transform.scale.y", HEIGHT.low / HEIGHT.high, 1), forKey: "height")
   }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) { fatalError() }
 }
 
 final class Delegate: NSObject, NSApplicationDelegate {
@@ -86,13 +107,11 @@ final class Delegate: NSObject, NSApplicationDelegate {
         + "  \(Int(w.frame.width))×\(Int(w.frame.height))")
     }
 
-    Timer.scheduledTimer(withTimeInterval: 1 / FPS, repeats: true) { _ in
-      self.elapsed += 1 / FPS
+    // Only to end the run. The breathing needs no timer at all now — that is
+    // the difference this probe exists to show.
+    Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { _ in
+      self.elapsed += 0.25
       if self.elapsed >= self.total { NSApp.terminate(nil) }
-      for v in self.views {
-        v.phase += (2 * .pi) / (PERIOD * FPS)
-        v.needsDisplay = true
-      }
     }
   }
 }

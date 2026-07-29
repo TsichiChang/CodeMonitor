@@ -9,6 +9,19 @@
 /// display at once, pass clicks through, and never take focus. Those are
 /// `NSWindow` properties with no SwiftUI equivalent.
 ///
+/// Not SwiftUI does not mean not Core Animation, and for a while it was taken
+/// to. The breathing was a 30fps timer setting `needsDisplay` on a
+/// screen-sized view, which redrew a gradient on the CPU every frame, on every
+/// display. Measured with `tools/band-probe.swift`: **11.5% of a core while
+/// lit** — nearly twice what the two-second poll cost before ADR-0008 replaced
+/// it, and 165 times what ADR-0008 measured for the dashboard's own breathing
+/// cards, which are driven on the compositor. That measurement predated the
+/// band, so this cost had never been in one.
+///
+/// It is now a `CAGradientLayer` built once at its tallest, with opacity and a
+/// vertical scale animated by Core Animation. Nothing is drawn per frame and
+/// there is no timer at all.
+///
 /// Numbers here were found by looking, not chosen — `tools/band-probe.swift`
 /// is the same band standing alone, for tuning them without a rebuild.
 
@@ -24,7 +37,6 @@ final class AmbientBand {
 
   private var windows: [NSWindow] = []
   private var views: [BandView] = []
-  private var ticker: Timer?
 
   init() {
     NotificationCenter.default.addObserver(
@@ -82,20 +94,9 @@ final class AmbientBand {
       windows.append(window)
       views.append(view)
     }
-
-    guard !views.isEmpty else { return }
-    let tick = 1.0 / BandView.fps
-    ticker = Timer.scheduledTimer(withTimeInterval: tick, repeats: true) { [weak self] _ in
-      MainActor.assumeIsolated {
-        guard let self else { return }
-        for view in self.views { view.advance(by: tick) }
-      }
-    }
   }
 
   private func teardown() {
-    ticker?.invalidate()
-    ticker = nil
     for window in windows { window.orderOut(nil) }
     windows.removeAll()
     views.removeAll()
@@ -115,48 +116,121 @@ final class AmbientBand {
 // MARK: - Drawing
 
 /// The glow itself. Both its opacity and its height breathe.
+///
+/// The layer is built once at the tallest and brightest the band ever gets, and
+/// the breath is expressed as a fraction of that: `opacity` for the tint, a
+/// vertical `transform.scale` anchored at the screen edge for the height. Both
+/// are properties Core Animation interpolates in the render server, so the
+/// breathing costs no per-frame work in this process — which is the whole point
+/// of the change, and the same mechanism the dashboard's cards already ran on
+/// when ADR-0008 measured them at 0.07%.
 private final class BandView: NSView {
-  static let fps = 30.0
+  /// The band at full urgency, at the top of a breath. Everything else is this
+  /// scaled down, so the geometry is computed once instead of per frame.
+  private static let maxHeight: CGFloat = 46
+  private static let maxAlpha: CGFloat = 0.83
 
-  var urgency: CGFloat = 0
-  private var phase: CGFloat = 0
+  private let glow = CAGradientLayer()
 
-  func advance(by seconds: Double) {
-    // Faster as the wait drags on, bracketing the 1.2s a waiting card uses so
-    // one urgency reads the same on both surfaces.
-    let period = 1.8 - 0.8 * urgency
-    phase += (2 * .pi) * CGFloat(seconds) / CGFloat(period)
-    needsDisplay = true
+  var urgency: CGFloat = 0 {
+    didSet { breathe() }
   }
 
-  override func draw(_ dirtyRect: NSRect) {
-    guard let ctx = NSGraphicsContext.current?.cgContext else { return }
+  override init(frame frameRect: NSRect) {
+    super.init(frame: frameRect)
+    wantsLayer = true
+    // Nothing is ever drawn into this view, so AppKit should not keep a backing
+    // store for it — the sublayer is the entire contents.
+    layerContentsRedrawPolicy = .never
+
+    let amber = NSColor(Palette.statusWaiting)
+    glow.colors = [amber.withAlphaComponent(1).cgColor, amber.withAlphaComponent(0).cgColor]
+    // Unit coordinates in an unflipped layer: (0.5, 0) is the bottom edge, which
+    // is where the light comes from. A hard line reads as a UI element left
+    // open; a glow reads as light (ADR-0014).
+    glow.startPoint = CGPoint(x: 0.5, y: 0)
+    glow.endPoint = CGPoint(x: 0.5, y: 1)
+    // Grows upward from the screen edge rather than about its own centre.
+    glow.anchorPoint = CGPoint(x: 0.5, y: 0)
+    layer?.addSublayer(glow)
+    layoutGlow()
+    breathe()
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) { fatalError() }
+
+  override func layout() {
+    super.layout()
+    layoutGlow()
+  }
+
+  private func layoutGlow() {
+    // Implicit animations off: a window being placed is not a breath.
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    glow.bounds = CGRect(x: 0, y: 0, width: bounds.width, height: Self.maxHeight)
+    glow.position = CGPoint(x: bounds.midX, y: 0)
+    CATransaction.commit()
+  }
+
+  /// Restarts the breath at the current urgency.
+  ///
+  /// Both ranges are wider than they look like they need to be. A contrast that
+  /// is unmistakable side by side is nearly invisible spread over a 1.2s fade —
+  /// the same lesson Theme.swift records for card tints — and peripheral vision
+  /// answers to a moving boundary long before a changing brightness (ADR-0006).
+  /// The first two attempts, narrow and with a fixed edge, went unnoticed
+  /// entirely.
+  private func breathe() {
+    let lowAlpha = 0.09 + 0.10 * urgency
+    let highAlpha = lowAlpha + (0.45 + 0.19 * urgency)
+    let lowHeight = 10 + 4 * urgency
+    let highHeight = lowHeight + (24 + 8 * urgency)
+
+    glow.removeAllAnimations()
 
     // A still band was invisible in testing, so motion is not optional here —
     // but neither is honouring the setting that asks for none. Reduced motion
     // gets the peak, held.
-    let still = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-    let breath: CGFloat = still ? 1 : 0.5 + 0.5 * sin(phase)
+    guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
+      CATransaction.begin()
+      CATransaction.setDisableActions(true)
+      glow.opacity = Float(highAlpha / Self.maxAlpha)
+      glow.transform = CATransform3DMakeScale(1, highHeight / Self.maxHeight, 1)
+      CATransaction.commit()
+      return
+    }
 
-    // Both ranges are wider than they look like they need to be. A contrast
-    // that is unmistakable side by side is nearly invisible spread over a
-    // 1.2s fade — the same lesson Theme.swift records for card tints — and
-    // peripheral vision answers to a moving boundary long before a changing
-    // brightness (ADR-0006). The first two attempts, narrow and with a fixed
-    // edge, went unnoticed entirely.
-    let alpha = (0.09 + 0.10 * urgency) + (0.45 + 0.19 * urgency) * breath
-    let height = (10 + 4 * urgency) + (24 + 8 * urgency) * breath
+    // Faster as the wait drags on, bracketing the 1.2s a waiting card uses so
+    // one urgency reads the same on both surfaces. Halved because autoreversing
+    // makes a full cycle out of two passes.
+    let period = 1.8 - 0.8 * urgency
+    let ease = CAMediaTimingFunction(name: .easeInEaseOut)
 
-    let amber = NSColor(Palette.statusWaiting).withAlphaComponent(alpha).cgColor
-    guard let clear = amber.copy(alpha: 0),
-      let gradient = CGGradient(
-        colorsSpace: CGColorSpace(name: CGColorSpace.sRGB)!,
-        colors: [amber, clear] as CFArray, locations: [0, 1])
-    else { return }
+    func pulse(_ keyPath: String, _ from: CGFloat, _ to: CGFloat) -> CABasicAnimation {
+      let animation = CABasicAnimation(keyPath: keyPath)
+      animation.fromValue = from
+      animation.toValue = to
+      animation.duration = period / 2
+      animation.autoreverses = true
+      animation.repeatCount = .infinity
+      animation.timingFunction = ease
+      return animation
+    }
 
-    ctx.saveGState()
-    ctx.clip(to: CGRect(x: 0, y: 0, width: bounds.width, height: height))
-    ctx.drawLinearGradient(gradient, start: .zero, end: CGPoint(x: 0, y: height), options: [])
-    ctx.restoreGState()
+    // Resting at the low end, so a band that somehow loses its animation reads
+    // as dim rather than as a lit bar sitting there.
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    glow.opacity = Float(lowAlpha / Self.maxAlpha)
+    glow.transform = CATransform3DMakeScale(1, lowHeight / Self.maxHeight, 1)
+    CATransaction.commit()
+
+    glow.add(
+      pulse("opacity", lowAlpha / Self.maxAlpha, highAlpha / Self.maxAlpha), forKey: "alpha")
+    glow.add(
+      pulse("transform.scale.y", lowHeight / Self.maxHeight, highHeight / Self.maxHeight),
+      forKey: "height")
   }
 }
