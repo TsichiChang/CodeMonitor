@@ -106,9 +106,12 @@ final class SessionMonitor {
   /// How long to wait when nothing is running.
   private static let quietInterval: TimeInterval = 15
 
-  /// How long a dismissal is remembered. Long enough that closing a card is not
-  /// quietly undone, short enough that the list cannot grow without bound.
-  private static let dismissalLifetime: TimeInterval = 7 * 24 * 60 * 60
+  /// How long a dismissal is remembered — and, for the same reasons, a visit.
+  /// Long enough that closing or reading a card is not quietly undone, short
+  /// enough that neither list can grow without bound. One constant rather than
+  /// two, because the two maps age for identical reasons and a second number
+  /// would only be a second thing to keep in step.
+  nonisolated private static let dismissalLifetime: TimeInterval = 7 * 24 * 60 * 60
 
   /// The gap before the next scan, chosen from what the last one found.
   ///
@@ -205,22 +208,42 @@ final class SessionMonitor {
   }
 
   /// Flags idle sessions that have acted since they were last visited.
-  ///
-  /// Visits to sessions that no longer exist are dropped here rather than on a
-  /// timer: the map is only meaningful against sessions currently on screen,
-  /// and letting it grow forever would be a store of its own.
   private func markUnread(in snapshot: inout SessionSnapshot) {
-    var live: [String: Date] = [:]
     for index in snapshot.sessions.indices {
       let session = snapshot.sessions[index]
-      if let visited = visits[session.id] { live[session.id] = visited }
       snapshot.sessions[index].isUnread =
         session.state == .idle && session.lastActivity > (visits[session.id] ?? .distantPast)
     }
-    if live.count != visits.count {
-      visits = live
-      HookStateStore.saveVisits(visits)
-    }
+
+    let kept = Self.retainedVisits(visits, now: Date())
+    guard kept.count != visits.count else { return }
+    visits = kept
+    HookStateStore.saveVisits(visits)
+  }
+
+  /// Visits still worth remembering.
+  ///
+  /// **By age, never by absence from a scan**, and deliberately taking no
+  /// session list so that it cannot do otherwise. Dropping visits to sessions
+  /// missing from the current snapshot looked like tidy housekeeping and was
+  /// the same defect the dismissal map had already been fixed for. It is worse
+  /// here, because ADR-0021 made the absence *guaranteed*: a session that comes
+  /// back is withheld for a scan first, so every returning session lost its
+  /// visit, turned blue again, jumped back above the sessions already read, and
+  /// re-entered the shortcut's queue — with no way to clear it but jumping a
+  /// second time, since jumping is the only thing that counts as reading
+  /// (ADR-0018).
+  ///
+  /// The window is the dismissal window for the same reason: long enough that a
+  /// visit is not quietly forgotten, short enough that the map cannot grow
+  /// without bound. Nothing listed can outlast it — a source stops reading a
+  /// transcript at a day (`Aging.readHorizon`), so a week-old visit belongs to
+  /// a session that cannot be on screen.
+  nonisolated static func retainedVisits(
+    _ visits: [String: Date], now: Date
+  ) -> [String: Date] {
+    let cutoff = now.addingTimeInterval(-dismissalLifetime)
+    return visits.filter { $0.value >= cutoff }
   }
 
   /// Appends what this scan saw, when `snapshotLog` is set in defaults.
@@ -350,11 +373,8 @@ final class SessionMonitor {
     for key in expired { dismissed.removeValue(forKey: key) }
     if revived || !expired.isEmpty { HookStateStore.saveDismissals(dismissed) }
 
-    var counts = StateCounts()
-    for session in kept { counts[session.state] += 1 }
     var result = snapshot
     result.sessions = kept
-    result.counts = counts
     return result
   }
 

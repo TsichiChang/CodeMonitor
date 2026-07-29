@@ -191,15 +191,14 @@ struct SessionInfo: Identifiable, Sendable, Hashable {
   /// and a waiting one is already asking louder than this ever could.
   var isUnread = false
 
-  /// Whether this session's state is solid enough to animate a card for.
-  ///
-  /// A reported block means Claude Code fired `PermissionRequest`. An inferred
-  /// one means a tool call has been quiet for 45 seconds — a guess, and one
-  /// that has been wrong. The cost of a wrong guess should not be a pulsing
-  /// card demanding attention it has not earned (ADR-0012).
-  var deservesAttention: Bool {
-    state != .waiting || evidence.source == .reported
-  }
+  // `deservesAttention` used to sit here, gating the pulse on whether a
+  // `waiting` had been reported or merely guessed at. It has been a constant
+  // `true` since ADR-0020: `blockedOnUser` is emitted by the hook store alone,
+  // and `waiting` is derived from nothing else, so no inferred block exists to
+  // withhold anything from. Keeping it would have kept the *design* it encodes
+  // — that guesses exist and are handled by drawing them faintly — which is the
+  // answer ADR-0020 rejected in favour of not guessing at all.
+
   /// Short human snippet describing the latest activity.
   var lastMessage: String?
 }
@@ -231,7 +230,18 @@ struct StateCounts: Sendable, Hashable {
 
 struct SessionSnapshot: Sendable {
   var sessions: [SessionInfo] = []
-  var counts = StateCounts()
+  /// Derived, never stored. It was assigned in three places — the scan, the
+  /// dismissal filter, and nowhere at all after sessions were withheld — and
+  /// the one that was missing is the shape this codebase keeps paying for: two
+  /// expressions of the same fact, drifting. A withheld session stayed in the
+  /// count, so the header read `1 waiting` with no card under it and the menu
+  /// bar went amber while the band stayed dark, for up to fifteen seconds
+  /// (ADR-0007: everything shown is meant to deserve a look).
+  var counts: StateCounts {
+    var counts = StateCounts()
+    for session in sessions { counts[session.state] += 1 }
+    return counts
+  }
   var generatedAt = Date()
   /// True when process scanning (ps/lsof) succeeded this cycle.
   var processScanOk = false

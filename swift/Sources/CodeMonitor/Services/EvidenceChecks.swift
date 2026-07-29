@@ -291,6 +291,61 @@ enum EvidenceChecks {
     return failures
   }
 
+  /// What survives folding a hook's report into a session it already knows.
+  ///
+  /// The precedence half has cost two defects; the carry-over half cost a
+  /// third, which is the reason this table exists at all. A hook's pid was
+  /// being dropped, so a reported session had to win the directory competition
+  /// it was supposed to be exempt from (ADR-0005), and a blocked session that
+  /// lost it aged out in five minutes with the ambient band going dark on it.
+  static func runHookMergeChecks() -> Int {
+    let now = Date()
+    func hook(_ activity: Activity, ago: TimeInterval, pid: Int32? = 4242) -> HookState {
+      HookState(
+        tool: .claude, sessionID: "s", activity: activity, pid: pid, tty: "/dev/ttys009",
+        cwd: "/tmp/p", termProgram: "otty", tabID: "t_1", paneID: "p_1",
+        updated: now.addingTimeInterval(-ago))
+    }
+    func session(_ activity: Activity, ago: TimeInterval) -> SessionInfo {
+      SessionInfo(
+        id: "claude:s", tool: .claude, projectPath: "/tmp/p", workingDirectory: "/tmp/p",
+        project: "p", evidence: Evidence(activity, at: now.addingTimeInterval(-ago),
+                                         source: .inferred),
+        state: .idle)
+    }
+
+    var failures = 0
+    func check(_ name: String, _ passed: Bool) {
+      if passed { print("  ✓ \(name)") } else { failures += 1; print("  ✗ \(name)") }
+    }
+
+    check(
+      "a hook's pid is taken, not guessed at from a directory",
+      SessionScanner.applying(hook(.blockedOnUser, ago: 10), to: session(.turnInFlight, ago: 60))
+        .pid == 4242)
+    check(
+      // The pid is an observation from inside the session, not a claim about
+      // what it is doing, so losing on freshness must not cost it.
+      "a hook that loses on freshness still hands over its pid",
+      SessionScanner.applying(hook(.turnInFlight, ago: 600), to: session(.turnComplete, ago: 1))
+        .pid == 4242)
+    check(
+      "the pane a hook recorded comes across",
+      SessionScanner.applying(hook(.turnComplete, ago: 10), to: session(.unknown, ago: 10))
+        .paneID == "p_1")
+    check(
+      // Esc: the transcript is later and says something, so it keeps the turn.
+      "a later transcript that says something keeps its own word",
+      SessionScanner.applying(hook(.turnInFlight, ago: 600), to: session(.turnComplete, ago: 1))
+        .evidence.activity == .turnComplete)
+    check(
+      // `! nvim`: later, but saying nothing, so the hook's Stop stands.
+      "a later `unknown` does not displace a hook's Stop",
+      SessionScanner.applying(hook(.turnComplete, ago: 600), to: session(.unknown, ago: 1))
+        .evidence.activity == .turnComplete)
+    return failures
+  }
+
   /// A session has to be seen twice before it is shown.
   static func runSightingChecks() -> Int {
     func s(_ id: String) -> SessionInfo {
@@ -315,6 +370,34 @@ enum EvidenceChecks {
       "and shown once it is seen again",
       SessionMonitor.withholdingFirstSightings([s("a"), s("new")], seenBefore: ["a", "new"])
         .map(\.id) == ["a", "new"])
+    return failures
+  }
+
+  /// A visit is forgotten by age, never because a scan missed its session.
+  ///
+  /// ADR-0021 guarantees a returning session is absent for at least one scan,
+  /// so pruning on absence marked every one of them unread again — and jumping
+  /// is the only thing that clears that (ADR-0018).
+  static func runVisitChecks() -> Int {
+    let now = Date()
+    var failures = 0
+    func check(_ name: String, _ passed: Bool) {
+      if passed { print("  ✓ \(name)") } else { failures += 1; print("  ✗ \(name)") }
+    }
+
+    // The session these belong to is deliberately not passed — the function
+    // takes no session list, which is what makes pruning on absence
+    // unexpressible rather than merely avoided.
+    let visits = [
+      "claude:gone-from-this-scan": now.addingTimeInterval(-60),
+      "claude:read-last-week": now.addingTimeInterval(-8 * 24 * 60 * 60),
+    ]
+    let kept = SessionMonitor.retainedVisits(visits, now: now)
+
+    check("a visit survives the session vanishing from a scan",
+          kept["claude:gone-from-this-scan"] != nil)
+    check("a visit is forgotten once it is older than the window",
+          kept["claude:read-last-week"] == nil)
     return failures
   }
 

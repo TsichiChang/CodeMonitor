@@ -262,14 +262,6 @@ enum TranscriptReader {
     return nil
   }
 
-  private static func firstJSONObject(in text: String) -> [String: Any]? {
-    for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
-      guard let obj = parseObject(line) else { return nil }
-      return obj
-    }
-    return nil
-  }
-
   private static func parseObject(_ line: Substring) -> [String: Any]? {
     let trimmed = line.trimmingCharacters(in: .whitespaces)
     guard !trimmed.isEmpty, let data = trimmed.data(using: .utf8) else { return nil }

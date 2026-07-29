@@ -43,12 +43,8 @@ actor SessionScanner {
 
     sessions.sort(by: SessionInfo.inAttentionOrder)
 
-    var counts = StateCounts()
-    for session in sessions { counts[session.state] += 1 }
-
     return SessionSnapshot(
       sessions: sessions,
-      counts: counts,
       generatedAt: now,
       processScanOk: scanOK
     )
@@ -72,10 +68,6 @@ actor SessionScanner {
 
   // MARK: - Reported evidence
 
-  /// Replaces inferred evidence with what a tool said about itself (ADR-0010).
-  ///
-  /// A hook also knows things no amount of scanning can recover: the pane its
-  /// session lives in, and its pid without a directory guess.
   /// How far behind a hook's timestamp may be and still count as current.
   ///
   /// The hook script stamps whole seconds (`date +%s`) while a transcript's
@@ -85,6 +77,65 @@ actor SessionScanner {
   /// coin between the two sources.
   private static let hookClockSlack: TimeInterval = 2
 
+  /// Folds one hook's report into the session it belongs to.
+  ///
+  /// Pure and separate from the loop below so the rule can be asserted
+  /// directly. Two defects have landed in it, both about which source wins and
+  /// what survives the merge, and neither was reachable from a check table
+  /// while this was five lines in the middle of a scan.
+  ///
+  /// **Precedence.** The hook wins unless the transcript is both later *and*
+  /// saying something.
+  ///
+  /// A hook fires on events no transcript write follows, so it is usually the
+  /// fresher of the two. But not always, and that exception was a defect:
+  /// pressing Esc writes `[Request interrupted by user]` into the transcript
+  /// and fires no hook at all — not even `StopFailure`. The hook's last word
+  /// stays `PreToolUse`, and a *reported* turnInFlight never decays, so an
+  /// interrupted session claimed to be running for as long as its process
+  /// lived. Taking the hook's activity while taking the transcript's newer
+  /// timestamp was the worst of both: it dated a stale event to the moment of a
+  /// write that contradicted it.
+  ///
+  /// "Saying something" is the other half, and going without it was its own
+  /// defect. A transcript is also written by things that are not turns at all —
+  /// a slash command, `! nvim`, an injected reminder — and those read as
+  /// `unknown`. Letting a later `unknown` displace a hook's `Stop` threw away
+  /// the one source that actually knew the turn had ended.
+  ///
+  /// **What is taken regardless.** Terminal context and the pid are facts the
+  /// hook observed from inside the session, not claims about what it is doing,
+  /// so losing the precedence contest does not cost them.
+  nonisolated static func applying(_ hook: HookState, to session: SessionInfo) -> SessionInfo {
+    var merged = session
+
+    let inferred = session.evidence
+    let transcriptIsLater =
+      inferred.activity != .unknown
+      && inferred.at > hook.updated.addingTimeInterval(hookClockSlack)
+    if !transcriptIsLater {
+      merged.evidence = Evidence(
+        hook.activity, at: max(inferred.at, hook.updated), source: .reported)
+    }
+
+    // The hook names its own pid, which is the one thing no amount of scanning
+    // can establish (ADR-0003). Taking it is what exempts a reported session
+    // from the directory competition in `applyLiveness` — ADR-0005's amendment
+    // rests on that exemption, and this line going missing is what took it
+    // away: a blocked session sharing a directory with an active one lost the
+    // match it never had to enter, aged out at five minutes, and took the
+    // ambient band down with it.
+    if let pid = hook.pid { merged.pid = pid }
+    merged.tabID = hook.tabID
+    merged.paneID = hook.paneID
+    if let tty = hook.tty { merged.tty = tty }
+    return merged
+  }
+
+  /// Replaces inferred evidence with what a tool said about itself (ADR-0010).
+  ///
+  /// A hook also knows things no amount of scanning can recover: the pane its
+  /// session lives in, and its pid without a directory guess.
   private func applyReports(to sessions: inout [SessionInfo]) {
     let reported = HookStateStore.states()
     guard !reported.isEmpty else { return }
@@ -92,37 +143,7 @@ actor SessionScanner {
     var unclaimed = reported
     for index in sessions.indices {
       guard let hook = unclaimed.removeValue(forKey: sessions[index].id) else { continue }
-
-      // The hook wins unless the transcript is both later *and* saying
-      // something.
-      //
-      // A hook fires on events no transcript write follows, so it is usually
-      // the fresher of the two. But not always, and that exception was a
-      // defect: pressing Esc writes `[Request interrupted by user]` into the
-      // transcript and fires no hook at all — not even `StopFailure`. The
-      // hook's last word stays `PreToolUse`, and a *reported* turnInFlight
-      // never decays, so an interrupted session claimed to be running for as
-      // long as its process lived. Taking the hook's activity while taking the
-      // transcript's newer timestamp was the worst of both: it dated a stale
-      // event to the moment of a write that contradicted it.
-      //
-      // "Saying something" is the other half, and going without it was its own
-      // defect. A transcript is also written by things that are not turns at
-      // all — a slash command, `! nvim`, an injected reminder — and those read
-      // as `unknown`. Letting a later `unknown` displace a hook's `Stop` threw
-      // away the one source that actually knew the turn had ended.
-      let inferred = sessions[index].evidence
-      let transcriptIsLater =
-        inferred.activity != .unknown
-        && inferred.at > hook.updated.addingTimeInterval(Self.hookClockSlack)
-      if !transcriptIsLater {
-        sessions[index].evidence = Evidence(
-          hook.activity, at: max(inferred.at, hook.updated), source: .reported)
-      }
-
-      sessions[index].tabID = hook.tabID
-      sessions[index].paneID = hook.paneID
-      if let tty = hook.tty { sessions[index].tty = tty }
+      sessions[index] = Self.applying(hook, to: sessions[index])
     }
 
     // A report with no matching session is still a session. Its store may be

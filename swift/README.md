@@ -71,7 +71,7 @@ to restore it from.
 | `Services/Shell.swift` | Bounded child-process execution (jump path only) |
 | `Views/Metrics.swift` | Every length, derived from the screen's point density |
 | `Views/AmbientBand.swift` | The edge glow — AppKit, above full-screen apps |
-| `Views/IdleRowView.swift` | An idle session, collapsed to a line |
+| `Views/SessionCardView.swift` | One tile, in both shapes — an idle session is the same tile folded shut |
 | `Views/` | SwiftUI dashboard, cards, menu bar, settings |
 
 ## Being noticed, and getting there
@@ -90,13 +90,16 @@ So two things exist for that, and neither of them is the dashboard:
   is the point. It sits above full-screen apps, passes clicks through, takes no
   focus and needs no permission. Turn it off in Settings.
 - **⌃⌥⌘J jumps to whatever most deserves attention** — longest-waiting first,
-  then running, then idle. Press again within twenty seconds and it advances to
+  then running, then idle. Press again within eight seconds and it advances to
   the next; after that it starts from the most urgent again. There is no
   selection to aim with, and so nothing on screen has to show one: arriving is
   what answers "which session?". `--focus-next --dry-run` prints the order.
 
-Only a *reported* wait lights the band. An inferred one means a tool call went
-quiet for 45 seconds, and a guess does not get to light up the room.
+Every wait that lights the band was reported by the tool itself, because that is
+the only kind there is: `waiting` is derived from one event, which one source
+emits (ADR-0020). Silence is never read as a permission prompt — a turn that has
+gone quiet reads as `running 12m`, which states a fact instead of guessing at a
+reason.
 
 Re-run `tools/dead-wait.py` after a week: if 7.6 drops to one or two, the glow
 did its job.
@@ -115,31 +118,42 @@ poll rate at once, so a single wrong `running` was four bugs. Every one of them
 is now a line in the check table.
 
 `--diagnose` prints each session's evidence alongside its derived state, and
-marks the source `reported` or `inferred` — the difference between "Claude Code
-fired `PermissionRequest`" and "a tool call has been quiet for 45 seconds".
-Only the first pulses.
+marks the source `reported` or `inferred` — the difference between "the tool
+said so" and "this was read off a file's timestamp". Both appear on screen; what
+inference may no longer produce is `waiting` (ADR-0020).
 
-## Reporting state from hooks (optional)
+## Reporting state from hooks
 
-Installing the hook is opt-in and changes a file this app does not otherwise
-touch, so it is a manual step. Nothing breaks without it; state stays inferred.
+Hooks are what let each tool say what it is doing instead of it being guessed at,
+and they are why `waiting` can be trusted at all: it is derived from one event,
+which one source emits. Without them nothing breaks — state stays inferred, and
+a session sitting on a permission prompt reads as `running` until it ages out.
 
-Copy the script somewhere stable and make it executable:
+**Settings → "Report state from hooks"** installs and removes them per tool. The
+same thing from the CLI:
 
 ```bash
-mkdir -p ~/.claude/hooks
-cp swift/hooks/codemonitor-hook.sh ~/.claude/hooks/
-chmod +x ~/.claude/hooks/codemonitor-hook.sh
+"$APP" --hooks              # what is installed, per tool
+"$APP" --install-hooks
+"$APP" --uninstall-hooks
 ```
 
-Then **append** an entry to each event's array in `~/.claude/settings.json` —
-that file already holds other integrations' hooks, and every event is a list
-precisely so several can coexist. Do not replace what is there.
+This writes to files the app does not own — `~/.claude/settings.json` and
+`~/.codex/hooks.json` — which also hold other integrations' hooks. So it copies
+each to a dated backup first, **appends** to each event's array rather than
+replacing it, tags its own entries with `_codemonitor`, and takes only those out
+again on uninstall. Installing twice updates in place instead of duplicating.
+Sessions already running keep their old setup until they restart.
+
+### What it writes
+
+Worth knowing if you want to check the result, or register it by hand:
 
 ```jsonc
-// under "hooks", add one of these objects to each named event's array:
-{ "hooks": [{ "type": "command",
-  "command": "~/.claude/hooks/codemonitor-hook.sh - \"$PPID\"" }] }
+// under "hooks", one of these objects is appended to each named event's array:
+{ "_codemonitor": true,
+  "hooks": [{ "type": "command",
+    "command": "~/.claude/hooks/codemonitor-hook.sh - \"$PPID\"" }] }
 ```
 
 Which event fired is read from the payload Claude sends on stdin, so the command
@@ -166,14 +180,18 @@ It is passed only on those two events because they are the moments the session's
 pane is certainly focused — the user has just typed into it — and Otty can only
 be asked what is focused, never what is calling (ADR-0009).
 
+The script itself is installed to `~/.claude/hooks/codemonitor-hook.sh`, inside
+your own directory rather than referenced inside the app bundle, so moving or
+replacing the app cannot silently break every registered hook.
+
 State is written to `~/.local/state/codemonitor/sessions/<session-id>.json`, one
 file per session, which is why it survives the app being closed. Set
-`CODEMONITOR_STATE_DIR` to relocate it. To undo everything, remove the entries
-from `settings.json` and delete that directory.
+`CODEMONITOR_STATE_DIR` to relocate it. `--uninstall-hooks` takes the entries
+back out; the state directory is left for you to delete.
 
 ### Codex
 
-The same script, told which tool it is speaking for. Append to the arrays in
+The same script, told which tool it is speaking for, registered in
 `~/.codex/hooks.json` — each event is a list there too, so it coexists with
 whatever else is registered:
 

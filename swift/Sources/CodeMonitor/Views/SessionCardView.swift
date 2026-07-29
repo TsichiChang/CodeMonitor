@@ -296,10 +296,11 @@ private struct BreathingBackground: ViewModifier {
 
   func body(content: Content) -> some View {
     let breath = Palette.breath(for: session.state, scheme: scheme)
-    // A guessed block does not get to pulse. Reported `waiting` means Claude
-    // Code fired `PermissionRequest`; inferred means a tool call has been quiet
-    // for 45 seconds, and that guess has been wrong (ADR-0012).
-    let animates = breath != nil && session.deservesAttention && !reduceMotion
+    // Only the state and the accessibility setting decide this now. A third
+    // condition used to withhold the pulse from a *guessed* block; guessed
+    // blocks no longer exist, since `waiting` can only be something a tool
+    // reported (ADR-0020).
+    let animates = breath != nil && !reduceMotion
 
     content.background {
       if let breath, animates {
@@ -319,8 +320,9 @@ private struct BreathingBackground: ViewModifier {
           Rectangle().fill(tint(breath, at: context.date))
         }
       } else {
-        // Breathes but may not — an inferred block — rests at the lit end, so
-        // it still reads as amber without demanding attention (ADR-0012).
+        // Idle, which has no breath at all — or reduced motion, where a card
+        // that would breathe rests at the lit end instead, so the state still
+        // reads as its colour without anything moving.
         Rectangle().fill(breath?.to ?? Palette.resting(scheme))
       }
     }

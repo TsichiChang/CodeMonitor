@@ -25,28 +25,17 @@ protocol SessionSource: AnyObject {
 enum Aging {
   /// Store touched this recently ⇒ actively working.
   static let writing: TimeInterval = 4
-  /// A model may think or stream this long after a prompt or tool result.
-  static let generatingMax: TimeInterval = 3 * 60
   /// Beyond this, a turn that has produced nothing is treated as abandoned
   /// rather than still running. Nothing is claimed about *why* it stopped —
   /// that guess was `approvalSuspect`, and it is gone (ADR-0020).
   static let abandoned: TimeInterval = 10 * 60
-  /// How long a session stays listed after its last activity.
-  ///
-  /// `waiting` never expires: a session blocked on approval is the one thing
-  /// the user must not miss, and it is motionless by definition, so aging it
-  /// out would hide it exactly when it matters (ADR-0005).
-  ///
-  /// Applied by the scanner rather than by a source, because it has to run
-  /// *after* live processes are attached — a session backed by a running
-  /// process is still open no matter how long its store has been quiet.
-  static func window(for state: SessionState) -> TimeInterval {
-    switch state {
-    case .waiting: .infinity
-    case .running: 30 * 60
-    case .idle: 10 * 60
-    }
-  }
+
+  // A per-state window used to live here — `waiting` never expiring, `running`
+  // getting a generous one, `idle` a short one. It is gone rather than merely
+  // unused: lifetime follows liveness and never state, which is the whole of
+  // ADR-0012 and what stopped a mistaken `waiting` from being immortal. Left in
+  // place it was a working implementation of the repealed rule, sitting one
+  // autocomplete away from whoever next edits a lifetime.
 
   /// How long a session with no live process stays listed, whatever its state.
   ///

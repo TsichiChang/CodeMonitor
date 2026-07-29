@@ -85,9 +85,11 @@ enum Diagnostics {
       print("Evidence derivation")
       let failures = EvidenceChecks.run() + EvidenceChecks.runOrderingChecks()
         + EvidenceChecks.runProcessChecks() + EvidenceChecks.runHostChecks()
-        + EvidenceChecks.runGrantChecks() + EvidenceChecks.runDirectoryChecks() + EvidenceChecks.runSightingChecks()
-        + Metrics.runChecks()
-      let total = EvidenceChecks.count + 5 + 9 + 5 + 4 + 5 + 3 + Metrics.checks.count
+        + EvidenceChecks.runGrantChecks() + EvidenceChecks.runDirectoryChecks()
+        + EvidenceChecks.runHookMergeChecks() + EvidenceChecks.runSightingChecks()
+        + EvidenceChecks.runVisitChecks() + Metrics.runChecks()
+      let total = EvidenceChecks.count + 5 + 9 + 5 + 4 + 5 + 5 + 3 + 2
+        + Metrics.checks.count
       print(failures == 0 ? "\nall \(total) checks pass" : "\n\(failures) FAILED")
       exit(failures == 0 ? 0 : 1)
     default:
@@ -304,22 +306,11 @@ enum Diagnostics {
     defer { monitor.stop() }
     await monitor.refresh()
 
-    let snapshot = monitor.snapshot
-    let needleLowered = needle.lowercased()
-    let matches = snapshot.sessions.filter {
-      $0.project.lowercased().contains(needleLowered)
-        || $0.projectPath.lowercased().contains(needleLowered)
-        || $0.id.lowercased().contains(needleLowered)
-    }
-
-    guard let session = matches.first else {
-      print("No session matching \"\(needle)\".")
-      print("Known projects: \(snapshot.sessions.map(\.project).joined(separator: ", "))")
-      exit(1)
-    }
-    if matches.count > 1 {
-      print("note: \(matches.count) sessions matched; using \"\(session.project)\"")
-    }
+    // Through `match`, which refuses an ambiguous string instead of taking the
+    // first of several. That refusal was written for this command and then not
+    // wired into it: jumping is not read-only — it marks the session read, and
+    // ADR-0018 leaves nothing to undo that with but the session speaking again.
+    guard let session = match(needle, in: monitor.snapshot) else { exit(1) }
 
     print("Focusing \"\(session.project)\" (\(session.projectPath))")
     print("  id:    \(session.id)")

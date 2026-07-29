@@ -38,11 +38,12 @@ final class AmbientBand {
   /// Shows, hides, and paces the band from the latest scan.
   func update(with snapshot: SessionSnapshot, enabled: Bool) {
     let now = Date()
-    // Only reported waits drive it. An inferred `waiting` is a guess that a
-    // tool call went quiet, and a guess does not get to light up the room
-    // (ADR-0012).
+    // Every `waiting` drives it, because every `waiting` was reported: exactly
+    // one source can produce `blockedOnUser` (ADR-0020). This used to carry a
+    // second condition excluding guessed blocks, from when silence for 45
+    // seconds could invent one.
     let longest = snapshot.sessions
-      .filter { $0.state == .waiting && $0.deservesAttention }
+      .filter { $0.state == .waiting }
       .map { now.timeIntervalSince($0.lastActivity) }
       .max()
 
