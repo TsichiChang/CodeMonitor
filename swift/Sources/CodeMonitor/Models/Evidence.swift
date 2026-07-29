@@ -112,14 +112,24 @@ extension Evidence {
       return age < Aging.writing ? .running : .idle
 
     case .turnInFlight:
-      if age < Aging.approvalSuspect { return .running }
-      // A dispatched tool that has gone quiet is either still working or
-      // blocked on a prompt, and only inference has to guess between them: a
-      // hook would have reported the block. So a reported turn stays running
-      // however long the tool takes, and an inferred one becomes a suspected
-      // block, then eventually nothing.
+      // A tool said it is working, so it is working, however long that takes —
+      // a hook would have reported a block if there were one.
       if source == .reported { return .running }
-      return age < Aging.waitingMax ? .waiting : .idle
+      // An inferred turn is a guess about a store that went quiet, and it now
+      // guesses only between "still running" and "abandoned".
+      //
+      // It used to have a third answer: quiet for 45 seconds meant a *suspected
+      // block*. That existed for sessions with no hook, where silence was the
+      // only hint that something might be waiting on the user — and it guessed
+      // at the single state this app must not get wrong. Hooks are installed
+      // now rather than hand-registered (ADR-0020), so the only sessions left
+      // without one are those where reporting has broken, and there a wrong
+      // `waiting` costs more than a missing one.
+      //
+      // What it detected has not become invisible: the card shows how long the
+      // current state has run, so a genuinely stuck turn reads as `running
+      // 12m` — a fact, rather than a guess demanding attention.
+      return age < Aging.abandoned ? .running : .idle
     }
   }
 

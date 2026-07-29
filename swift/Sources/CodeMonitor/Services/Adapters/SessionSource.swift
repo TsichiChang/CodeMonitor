@@ -25,12 +25,12 @@ protocol SessionSource: AnyObject {
 enum Aging {
   /// Store touched this recently ⇒ actively working.
   static let writing: TimeInterval = 4
-  /// A tool call unanswered this long is likely blocked on approval.
-  static let approvalSuspect: TimeInterval = 45
   /// A model may think or stream this long after a prompt or tool result.
   static let generatingMax: TimeInterval = 3 * 60
-  /// Beyond this, a stalled tool call is treated as abandoned.
-  static let waitingMax: TimeInterval = 10 * 60
+  /// Beyond this, a turn that has produced nothing is treated as abandoned
+  /// rather than still running. Nothing is claimed about *why* it stopped —
+  /// that guess was `approvalSuspect`, and it is gone (ADR-0020).
+  static let abandoned: TimeInterval = 10 * 60
   /// How long a session stays listed after its last activity.
   ///
   /// `waiting` never expires: a session blocked on approval is the one thing

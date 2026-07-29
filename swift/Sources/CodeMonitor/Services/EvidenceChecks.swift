@@ -44,9 +44,16 @@ enum EvidenceChecks {
       evidence: Evidence(.turnInFlight, at: .distantPast, source: .inferred, liveness: .alive),
       age: 10, expectedState: .running, expectedCurrent: true),
     .init(
-      name: "a quiet inferred turn is a suspected block",
+      // Was a suspected block. Guessing `waiting` off silence is exactly the
+      // error the display can least afford, and it only ever applied where
+      // hooks were absent — which installing them removed (ADR-0020).
+      name: "a quiet inferred turn is still just running",
       evidence: Evidence(.turnInFlight, at: .distantPast, source: .inferred, liveness: .alive),
-      age: 120, expectedState: .waiting, expectedCurrent: true),
+      age: 120, expectedState: .running, expectedCurrent: true),
+    .init(
+      name: "waiting is only ever something a tool reported",
+      evidence: Evidence(.blockedOnUser, at: .distantPast, source: .reported, liveness: .alive),
+      age: 5 * 60, expectedState: .waiting, expectedCurrent: true),
     .init(
       name: "an abandoned inferred turn is neither",
       evidence: Evidence(.turnInFlight, at: .distantPast, source: .inferred, liveness: .alive),
