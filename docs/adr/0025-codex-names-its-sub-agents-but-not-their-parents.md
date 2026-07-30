@@ -76,12 +76,28 @@ the parent, Codex because what names it cannot be resolved.
 
 ## Consequences
 
-Five cards become one. `foldDelegated` counts only delegated agents whose activity
-is `turnInFlight`, so the single `running` sub-agent under `globalpay_machpro`
-promotes one card carrying `⬡ 1`, and the four idle ones are dropped outright.
-That is correct rather than lossy: an idle sub-agent has finished its piece of
-somebody else's task and there is nothing for the user to do with it. Claude
-already behaves this way; Codex now matches.
+Measured after the change, on a machine whose sessions had moved on:
+
+```
+sessions the Codex source produced   10   (6 subagent, 4 user)
+cards on the dashboard                2   both thread_source=user
+```
+
+Not one delegated session produces a card of its own. That is the whole claim, and
+it holds.
+
+**The `⬡ N` count turns out to be rarer than expected**, which the first draft of
+this ADR got wrong. It predicted one card carrying `⬡ 1`; there was none.
+`foldDelegated` counts only delegated agents whose activity is `turnInFlight`, so a
+sub-agent has to be mid-turn at the moment of a scan to be counted — and
+sub-agents finish quickly. The three under `globalpay_machpro` had last written 22,
+44 and 96 minutes earlier, so all three read `turnComplete` and the count was zero.
+
+Idle sub-agents are therefore dropped outright rather than summarised. That is
+correct rather than lossy — one that has finished its piece of somebody else's task
+leaves the user nothing to do — but it means the badge reports *concurrent* work,
+never work that happened. Claude has behaved this way since ADR-0004 and nobody
+noticed, because the same condition hid it there too.
 
 "Show delegated sessions" in Settings still lists them, unchanged, for the case
 where the sub-agents *are* the work being watched.
@@ -92,11 +108,16 @@ own data supports, and the scanner reads one boolean.
 
 ## How this gets falsified
 
-The count is the test, and it is available before and after: 87 of 109 rollouts
-carry `thread_source: "subagent"`, and every one of them currently produces a card
-whenever it falls inside the read horizon. After the change no session with that
-field appears on its own, and `--diagnose` prints at most one Codex card per
-project directory.
+The count is the test, and it was available before and after — 87 of 109 rollouts
+carry `thread_source: "subagent"`, every one of them produced a card while inside
+the read horizon, and none does now.
+
+Stating it as "five cards become one" was the wrong form, and the reason is worth
+keeping: **a prediction about a live machine has to be about the rule, not about
+the current contents.** The sessions had turned over by the time it was checked, so
+a prediction naming specific cards could only be confirmed by luck. The rule —
+*no session whose `thread_source` is `subagent` appears on its own* — is checkable
+against whatever happens to be running.
 
 What would overturn the decision above is finding delegated Codex sessions whose
 `parent_thread_id` resolves to a *different* directory than their own. The

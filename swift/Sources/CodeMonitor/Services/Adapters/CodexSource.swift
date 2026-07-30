@@ -64,6 +64,7 @@ final class CodexSource: SessionSource {
       evidence: Self.evidence(entry, at: mtime),
       state: .idle,
       hostBundleID: Self.hostBundleID(for: meta?.originator),
+      isDelegated: Self.isDelegated(threadSource: meta?.threadSource),
       lastMessage: entry?.snippet
     )
   }
@@ -80,6 +81,25 @@ final class CodexSource: SessionSource {
     guard let key = originator?.lowercased() else { return nil }
     let desktopHosts = ["codex desktop": "com.openai.codex", "chatgpt": "com.openai.codex"]
     return desktopHosts.first { key.contains($0.key) }?.value
+  }
+
+  /// Whether a program spawned this session rather than a person (ADR-0025).
+  ///
+  /// 87 of 109 rollouts on this machine are sub-agents, and every Codex card on
+  /// the dashboard was one of them — three of those sitting in the jump queue,
+  /// which exists to walk what deserves a person's attention.
+  ///
+  /// Keyed on `thread_source` alone, though `parent_thread_id` and `source` agree
+  /// on all 87. `source` cannot be read the same way — it is a string on human
+  /// sessions and an object on delegated ones — and `parent_thread_id` says the
+  /// same thing indirectly.
+  ///
+  /// Only the exact value counts. `thread_source` has been observed here as
+  /// `subagent` and `user` and absent, and nothing promises a future value would
+  /// still say `subagent`; treating anything else as human under-reports
+  /// delegation, which shows one card too many rather than hiding one.
+  static func isDelegated(threadSource: String?) -> Bool {
+    threadSource?.lowercased() == "subagent"
   }
 
   /// Not private, so `--selftest` can run real rollout records through it.

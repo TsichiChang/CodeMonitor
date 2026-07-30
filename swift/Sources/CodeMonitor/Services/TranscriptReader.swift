@@ -64,6 +64,15 @@ struct CodexMeta: Sendable {
   /// What launched the session — `Codex Desktop`, a CLI, an editor extension.
   /// The one field that says whether a process will ever back this session.
   var originator: String?
+  /// What kind of thread this is: `subagent` for one a program spawned, `user`
+  /// for one a person opened, absent on older or CLI-started sessions.
+  ///
+  /// Read in preference to the neighbouring `source`, which says the same thing
+  /// and cannot be scanned for: it is a *string* on human sessions (`"cli"`,
+  /// `"vscode"`) and an *object* on delegated ones
+  /// (`{"subagent": {"other": "guardian"}}`), so a reader expecting either shape
+  /// gets the other exactly when the answer matters (ADR-0025).
+  var threadSource: String?
 }
 
 // MARK: - Reader
@@ -285,7 +294,10 @@ enum TranscriptReader {
       model: quotedField("model_provider", in: head),
       // Present in the record, unreachable at this cost. See above.
       gitBranch: nil,
-      originator: quotedField("originator", in: head)
+      originator: quotedField("originator", in: head),
+      // Sits before `base_instructions` in the record, so it survives the cut
+      // above — everything needed is still in the first few hundred bytes.
+      threadSource: quotedField("thread_source", in: head)
     )
   }
 

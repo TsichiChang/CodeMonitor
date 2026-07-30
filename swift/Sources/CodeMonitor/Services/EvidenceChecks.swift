@@ -383,6 +383,33 @@ enum EvidenceChecks {
       CodexSource.hostBundleID(for: "codex_cli_rs") == nil)
     check("a session with no originator has none", CodexSource.hostBundleID(for: nil) == nil)
 
+    // Delegation, read from the one field whose job is to say so (ADR-0025). The
+    // negatives matter more than the positive: every Codex card on the dashboard
+    // was a sub-agent, and the fix is only safe if it cannot swing the other way
+    // and hide a session somebody is sitting in.
+    check(
+      "a subagent thread is delegated",
+      CodexSource.isDelegated(threadSource: "subagent"))
+    check(
+      "a user thread is not",
+      !CodexSource.isDelegated(threadSource: "user"))
+    check(
+      // 16 of 22 human-started rollouts here omit the field entirely.
+      "and neither is one that does not say",
+      !CodexSource.isDelegated(threadSource: nil))
+    check(
+      // The conservative reading, stated as an assertion so it cannot drift into
+      // "anything unrecognised is a program". A value nobody has seen is a card
+      // too many, never a session hidden.
+      "an unrecognised thread source is treated as a person",
+      !CodexSource.isDelegated(threadSource: "orchestrator"))
+    check(
+      // `source` is the neighbouring field that says the same thing and is a
+      // string here, an object there. Pointing the reader at it would parse on
+      // human sessions and fail on exactly the delegated ones.
+      "the value is matched whole, not searched for",
+      !CodexSource.isDelegated(threadSource: "{\"subagent\":{\"other\":\"guardian\"}}"))
+
     // The lifetime consequence, which is the whole reason the field exists.
     let desktop = Evidence(.turnInFlight, at: .distantPast, source: .inferred, liveness: .unknown)
     let terminal = Evidence(.turnInFlight, at: .distantPast, source: .inferred, liveness: .absent)
