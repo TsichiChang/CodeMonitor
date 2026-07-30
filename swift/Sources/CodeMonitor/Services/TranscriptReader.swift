@@ -233,6 +233,30 @@ enum TranscriptReader {
     return entry
   }
 
+  /// The newest quota reading in a rollout tail (ADR-0023).
+  ///
+  /// Scanned backwards for the last `rate_limits` rather than read off the final
+  /// line, because the final line is usually a message or a tool call — the
+  /// limits ride on `token_count` events, which are frequent but not last.
+  ///
+  /// The slots are positional and their names lie about their contents: on this
+  /// machine `primary` was the seven-day window 3,799 times and the five-hour
+  /// window 307, so only `window_minutes` says which is which. Both are read and
+  /// keyed by length; a slot without a length is dropped rather than guessed at.
+  static func parseCodexRateLimits(_ text: String) -> [UsageWindow]? {
+    for line in text.split(separator: "\n", omittingEmptySubsequences: true).reversed() {
+      guard line.contains("\"rate_limits\""), let obj = parseObject(line) else { continue }
+      let limits = dict(dict(obj["payload"])["rate_limits"])
+      guard !limits.isEmpty else { continue }
+      let windows = ["primary", "secondary"].compactMap { slot -> UsageWindow? in
+        guard let values = limits[slot] as? [String: Any] else { return nil }
+        return UsageStore.window(from: values, percentKey: "used_percent", minutes: nil)
+      }
+      if !windows.isEmpty { return windows }
+    }
+    return nil
+  }
+
   /// Codex's `session_meta` cannot be parsed as JSON from a head window, so its
   /// fields are lifted out textually.
   ///

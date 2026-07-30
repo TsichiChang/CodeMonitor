@@ -134,25 +134,10 @@ struct SessionCardView: View {
   private static let tick: TimeInterval = 5
 
   @ViewBuilder
+  /// A live tile earns the icon's colour back: everything on it is meant to be
+  /// read. A folded, finished one does not — see `ToolMark`.
   private var toolMark: some View {
-    if let icon = ToolIcon.image(for: session.tool) {
-      // Colour follows the tile's weight rather than being fixed. An
-      // application icon is drawn to win a Dock, so on a folded, finished
-      // session it would be the loudest thing on it — and which tool a session
-      // belongs to is the one fact about it that never changes (ADR-0007). A
-      // live tile earns the colour back: everything on it is meant to be read.
-      Image(nsImage: icon)
-        .resizable()
-        .interpolation(.high)
-        .aspectRatio(contentMode: .fit)
-        .saturation(isIdle ? 0 : 1)
-        .opacity(isIdle ? 0.5 : 1)
-    } else {
-      // No application installed — the CLIs run without one.
-      Image(systemName: session.tool.symbolName)
-        .font(.system(size: metrics.caption * 0.95))
-        .foregroundStyle(isIdle ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.secondary))
-    }
+    ToolMark(tool: session.tool, size: metrics.body * 0.85, muted: isIdle)
   }
 
   /// Present in both shapes, so nothing about it moves when the tile folds.
@@ -168,8 +153,6 @@ struct SessionCardView: View {
       // (ADR-0014). The application's own icon rather than a symbol: it is
       // already what the user clicks on, so it needs no learning.
       toolMark
-        .frame(width: metrics.body * 0.85, height: metrics.body * 0.85)
-        .help(session.tool.label)
 
       Text(session.project)
         .font(.system(size: isIdle ? metrics.body * 0.88 : metrics.body,
@@ -271,14 +254,10 @@ struct SessionCardView: View {
     return short
   }
 
+  /// Kept as the name every call site already uses; the arithmetic moved to
+  /// `RelativeSpan` so the quota countdown formats identically (ADR-0023).
   static func relativeTime(_ date: Date, now: Date = Date()) -> String {
-    let seconds = max(0, Int(now.timeIntervalSince(date).rounded()))
-    if seconds < 60 { return "\(seconds)s" }
-    let minutes = Int((Double(seconds) / 60).rounded())
-    if minutes < 60 { return "\(minutes)m" }
-    let hours = Int((Double(minutes) / 60).rounded())
-    if hours < 24 { return "\(hours)h" }
-    return "\(Int((Double(hours) / 24).rounded()))d"
+    RelativeSpan.since(date, now: now)
   }
 }
 
