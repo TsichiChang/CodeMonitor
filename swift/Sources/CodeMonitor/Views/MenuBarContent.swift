@@ -45,9 +45,10 @@ struct MenuBarContent: View {
       Button("Usage — no tool is reporting") {}.disabled(true)
     } else {
       let now = Date()
+      let columns = ToolUsage.columns(across: monitor.snapshot.usage)
       ForEach(monitor.snapshot.usage.sorted { $0.tool.rawValue < $1.tool.rawValue }, id: \.tool) {
         usage in
-        ForEach(usage.displayedMinutes, id: \.self) { minutes in
+        ForEach(columns, id: \.self) { minutes in
           let reading = usage.reading(forMinutes: minutes, now: now)
           let window = usageWindowLabel(minutes: minutes)
           let tail = reading.resetsInText.map { " · resets in \($0)" } ?? ""

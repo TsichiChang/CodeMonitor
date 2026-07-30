@@ -631,24 +631,45 @@ enum EvidenceChecks {
       // is a fact the tool stated by listing its limits without it.
       "a window the tool never mentioned is unlimited, not unknown",
       usage.reading(forMinutes: 720, now: now) == .unlimited)
+    // A rolled-over window reads 0%, and both halves of that are derived from the
+    // old boundary rather than invented: the percentage because a window that has
+    // just begun has nothing spent in it, the countdown because the next boundary
+    // is one window-length on. An earlier rule said `—` here and was retired for
+    // being over-cautious — the stale case only arises while nothing is writing,
+    // and nothing writes while nothing is running.
     check(
-      // Not 0%: a fresh window was not measured at zero, it was not measured.
-      "a window whose reset has passed is unheard, not empty",
-      usage.reading(forMinutes: 10_080, now: now) == .unheard)
+      "a window whose reset has passed reads empty, not unknown",
+      usage.reading(forMinutes: 10_080, now: now)
+        == .spent(percent: 0, resetsIn: 7 * 24 * 3600 - 60))
     check(
-      "an elapsed window shows no countdown",
-      usage.reading(forMinutes: 10_080, now: now).resetsInText == nil)
+      // A seven-day window that rolled over a minute ago clears in seven days,
+      // not in a minute. Reading the countdown off `now` rather than off the
+      // reported boundary would have said the opposite.
+      "and its countdown points at the next boundary, not the elapsed one",
+      usage.reading(forMinutes: 10_080, now: now).resetsInText == "7d")
     check(
-      "the canonical pair is asked about even when only one was reported",
-      ToolUsage(tool: .claude, windows: [fiveHour], observedAt: now)
-        .displayedMinutes == [300, 10_080])
-    check(
-      "and a window nobody anticipated still gets a row, in length order",
+      // Several windows can elapse while nothing writes. The countdown has to
+      // land on the vendor's own cadence, so whole windows are advanced from the
+      // last known boundary rather than measured from `now`.
+      "several elapsed windows still land on the reported cadence",
       ToolUsage(
         tool: .codex,
-        windows: [UsageWindow(minutes: 720, usedPercent: 1, resetsAt: now)],
+        windows: [UsageWindow(minutes: 300, usedPercent: 80,
+                              resetsAt: now.addingTimeInterval(-11 * 60 * 60))],
         observedAt: now
-      ).displayedMinutes == [300, 720, 10_080])
+      ).reading(forMinutes: 300, now: now) == .spent(percent: 0, resetsIn: 4 * 60 * 60))
+    check(
+      "the canonical pair is asked about even when only one was reported",
+      ToolUsage.columns(across: [ToolUsage(tool: .claude, windows: [fiveHour], observedAt: now)])
+        == [300, 10_080])
+    check(
+      "and a window nobody anticipated still gets a row, in length order",
+      ToolUsage.columns(across: [
+        ToolUsage(tool: .claude, windows: [fiveHour], observedAt: now),
+        ToolUsage(
+          tool: .codex, windows: [UsageWindow(minutes: 720, usedPercent: 1, resetsAt: now)],
+          observedAt: now),
+      ]) == [300, 720, 10_080])
 
     // The trap. `primary` was the seven-day window 3,799 times on this machine
     // and the five-hour window 307 times, so a reader keyed on the slot name

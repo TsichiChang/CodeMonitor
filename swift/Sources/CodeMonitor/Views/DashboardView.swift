@@ -59,13 +59,59 @@ struct DashboardView: View {
       // Centred once the cards are a single column, right-aligned otherwise:
       // with one column there is no right edge for it to belong to, and hanging
       // off in the corner reads as a stray rather than as a heading.
-      VStack(alignment: .trailing, spacing: metrics.cardSpacing * 0.5) {
-        counts
-        quotas
+      // Folding only as far as it has to, each rung the next-narrowest
+      // arrangement, so dragging the window never skips a step or jumps back.
+      //
+      // Three rungs, widest first, and the whole thing only works because every
+      // rung refuses to compress.
+      //
+      // `ViewThatFits` asks each candidate for its ideal width and takes the
+      // first that fits. A candidate containing text that can wrap or truncate
+      // has no honest ideal width — it will always claim to fit and then arrive
+      // mangled, which is how `running` came to be set one letter per line and
+      // how the `5h` labels truncated to nothing. So the leaves carry
+      // `.lineLimit(1).fixedSize()` and the ladder does the adapting instead.
+      ViewThatFits(in: .horizontal) {
+        // 1. Everything on one line.
+        HStack(alignment: .center, spacing: metrics.groupSpacing) {
+          counts
+          quotaBlock(.allOnOneLine, folding: false)
+        }
+        // 2. Opposite ends of the same row: quotas take the leading edge, counts
+        //    keep the trailing one, and the width between them gets used rather
+        //    than left empty while both crowd one corner.
+        HStack(alignment: .top, spacing: metrics.groupSpacing) {
+          quotaBlock(.oneLinePerTool, folding: false)
+          Spacer(minLength: 0)
+          counts
+        }
+        // 3. Stacked. The last rung, and the only adaptive one — its quota rows
+        //    fold their own windows onto separate lines, which is the fold below
+        //    this one. Replacing this rung with the arrangement above, rather than
+        //    adding to it, is what left nothing to fall through to.
+        // Centred on each other, not left-aligned to each other. The two blocks
+        // are different widths and neither is the other's margin, so a shared
+        // left edge just made the narrower one look indented; a shared centre
+        // line reads as one heading in two rows.
+        VStack(alignment: .center, spacing: metrics.cardSpacing * 1.2) {
+          counts
+          quotaBlock(.oneLinePerTool, folding: true)
+        }
       }
         .frame(maxWidth: .infinity, alignment: columnCount == 1 ? .center : .trailing)
         .padding(.horizontal, metrics.edgePadding)
-        .padding(.top, metrics.edgePadding * 0.5)
+        .padding(.vertical, metrics.edgePadding * 0.5)
+        // Opaque, so cards scroll *under* the heading instead of through it.
+        // Without a background the inset is transparent, the two draw into the
+        // same band, and a card's title lands on top of the quota rows — the
+        // heading is the fixed thing here and must occlude what moves.
+        //
+        // The window's own colour, not a material. A material is what kept this
+        // out of the toolbar in the first place: it renders a grey slab that no
+        // styling on the contents can remove. `windowBackgroundColor` reads as
+        // part of the window rather than as a panel floating over it, and it
+        // follows the appearance setting for free.
+        .background(Color(nsColor: .windowBackgroundColor))
         // Animated on the column count, not the width: it should glide across
         // once when the layout actually changes, not track the cursor through
         // every intermediate width of a drag.
@@ -162,60 +208,221 @@ struct DashboardView: View {
   /// moment a quota actually bites, the session that hit it goes `waiting` and
   /// the band lights — so the loud channel already exists and this one does not
   /// need to compete for it (ADR-0024).
+  /// How the tools are arranged relative to each other.
+  private enum QuotaArrangement { case allOnOneLine, oneLinePerTool }
+
+  /// The quota block, in one arrangement.
+  ///
+  /// One function rather than three near-identical properties: the rungs differ by
+  /// two parameters, and three copies of the same body would be the shape this
+  /// repository keeps paying for.
+  ///
+  /// `folding` is what makes a rung adaptive, and only the last rung may be. A
+  /// candidate that can rearrange itself always reports that it fits, so any rung
+  /// above the last must be rigid or the ones below it are unreachable.
   @ViewBuilder
-  private var quotas: some View {
-    // Nothing at all when no tool is reporting, rather than an empty row. An
-    // empty `HStack` would still claim the stack's spacing, and the ticker below
-    // would still wake every five seconds to draw it — a cost with nothing on
-    // the other side. The menu says why it is missing; the header stays quiet.
-    if !monitor.snapshot.usage.isEmpty {
-      // Driven by a clock rather than by the scan, like a card's elapsed time:
-      // the countdown has to keep falling between scans, and at the slow cadence
-      // a scan can be fifteen seconds away.
-      TimelineView(.periodic(from: .now, by: 5)) { context in
-        HStack(spacing: metrics.cardSpacing * 1.6) {
-          ForEach(orderedUsage, id: \.tool) { usage in
-            quotaRow(usage, now: context.date)
-          }
+  private func quotaBlock(_ arrangement: QuotaArrangement, folding: Bool) -> some View {
+    quotaTicker { now in
+      let rows = ForEach(quotaRows, id: \.tool) { usage in
+        if folding {
+          quotaRow(usage, now: now)
+        } else {
+          quotaRowInline(usage, now: now)
         }
-        .font(.system(size: metrics.caption))
+      }
+      switch arrangement {
+      case .allOnOneLine:
+        HStack(spacing: metrics.groupSpacing * 0.6) { rows }
+      case .oneLinePerTool:
+        VStack(alignment: .leading, spacing: metrics.caption * 0.5) { rows }
       }
     }
   }
 
-  /// Stable order, so two tools never trade places between scans — the same rule
-  /// the session list follows for the same reason (ADR-0013).
-  private var orderedUsage: [ToolUsage] {
-    monitor.snapshot.usage.sorted { $0.tool.rawValue < $1.tool.rawValue }
+  /// Shared wrapper: nothing at all when no tool reports, and a clock for the
+  /// countdowns.
+  ///
+  /// Nothing rather than an empty row, because an empty `HStack` still claims the
+  /// stack's spacing and the ticker still wakes every five seconds to draw it — a
+  /// cost with nothing on the other side. The clock is here for the same reason a
+  /// card's elapsed time has one: the countdown must keep falling between scans,
+  /// and at the slow cadence a scan can be fifteen seconds away.
+  @ViewBuilder
+  private func quotaTicker<Content: View>(
+    @ViewBuilder _ content: @escaping (Date) -> Content
+  ) -> some View {
+    if !monitor.snapshot.usage.isEmpty {
+      TimelineView(.periodic(from: .now, by: 5)) { context in
+        content(context.date)
+          .font(.system(size: metrics.caption))
+          .lineLimit(1)
+      }
+    }
   }
 
+  /// One line per tool, with each window labelled inside its own cell.
+  ///
+  /// **Not a grid with shared column headings**, which is what the first attempt
+  /// built and what ADR-0023 forbids in as many words: setting Claude's five-hour
+  /// window beside Codex's under one heading invites reading a difference between
+  /// two numbers that share no denominator. `5h` is comparable — both are five
+  /// hours — but 79% of one plan's quota against 26% of another's is not, and a
+  /// column is an instruction to compare. Repeating `5h` on each row costs four
+  /// characters and removes the invitation.
   private func quotaRow(_ usage: ToolUsage, now: Date) -> some View {
-    HStack(spacing: metrics.caption * 0.5) {
-      Text(usage.tool.label)
-        .foregroundStyle(.quaternary)
-      ForEach(usage.displayedMinutes, id: \.self) { minutes in
-        let reading = usage.reading(forMinutes: minutes, now: now)
-        Text("\(usageWindowLabel(minutes: minutes)) \(reading.text)")
-          .monospacedDigit()
-          .foregroundStyle(.tertiary)
-          .help(quotaHelp(usage.tool, minutes, reading))
+    // One line while the windows fit beside each other, one line each when they
+    // do not. `ViewThatFits` picks the first that fits, and the stacked variant
+    // is narrower by construction, so it is chosen only when it has to be.
+    ViewThatFits(in: .horizontal) {
+      quotaRowInline(usage, now: now)
+      quotaRowStacked(usage, now: now)
+    }
+  }
+
+  private func quotaRowInline(_ usage: ToolUsage, now: Date) -> some View {
+    HStack(spacing: metrics.caption * 0.75) {
+      // The icon rather than the name. It is what the cards already use
+      // (ADR-0014), and it costs a fixed size instead of eleven characters that
+      // were wrapping onto a second line.
+      //
+      // In colour, not greyed. On a card the icon is redundant — the project
+      // name says which session it is — so ADR-0014 mutes it there. Here it is
+      // the row's only label, and greyscale made two vendors indistinguishable.
+      // Same element, different job.
+      ToolMark(tool: usage.tool, size: quotaIconSize)
+      ForEach(quotaColumns, id: \.self) { minutes in
+        quotaCell(usage, minutes: minutes, now: now)
+      }
+    }
+    // Rigid, so this arrangement can genuinely fail to fit and let the next rung
+    // take over. Truncating the `5h` label to nothing would have counted as
+    // fitting.
+    .fixedSize()
+  }
+
+  /// Every tool worth a row: whatever reported, plus whatever has sessions on
+  /// screen but has said nothing.
+  ///
+  /// The second half is why `—` exists. A tool running sessions and reporting no
+  /// quota is not a tool without limits — it is an integration that is not wired
+  /// up, and Claude needs a line in the user's own status-line script where Codex
+  /// needs nothing (ADR-0023). Showing the row makes the difference visible
+  /// instead of leaving a silent gap.
+  private var quotaRows: [ToolUsage] {
+    let reported = monitor.snapshot.usage
+    let silent = Set(monitor.snapshot.sessions.map(\.tool)).subtracting(reported.map(\.tool))
+      .map { ToolUsage(tool: $0, windows: [], observedAt: .distantPast) }
+    return (reported + silent).sorted { $0.tool.rawValue < $1.tool.rawValue }
+  }
+
+  private var quotaColumns: [Int] { ToolUsage.columns(across: monitor.snapshot.usage) }
+
+  /// Big enough to tell two vendors apart, small enough not to compete with the
+  /// state dots beside it.
+  private var quotaIconSize: Double { metrics.caption * 1.3 }
+
+  /// The windows of one tool, stacked, when they will not sit side by side.
+  ///
+  /// The icon aligns to the first line rather than centring across both: it
+  /// labels the group, and a mark floating between two rows belongs to neither.
+  private func quotaRowStacked(_ usage: ToolUsage, now: Date) -> some View {
+    HStack(alignment: .firstTextBaseline, spacing: metrics.caption * 0.75) {
+      ToolMark(tool: usage.tool, size: quotaIconSize)
+      VStack(alignment: .leading, spacing: metrics.caption * 0.35) {
+        ForEach(quotaColumns, id: \.self) { minutes in
+          quotaCell(usage, minutes: minutes, now: now)
+        }
       }
     }
   }
 
-  /// The countdown lives here rather than on screen. A reset time is what you
-  /// act on once, when deciding to wait or switch — not something to read every
-  /// time your eye crosses the header.
+  /// One window: its length, a bar, and how long until it clears.
+  ///
+  /// **No percentage.** The bar and a number beside it were the same fact twice —
+  /// the visual form of the duplication this repository keeps paying for — and the
+  /// bar was the half doing less, at 26pt wide where 4% rounded to a single pixel
+  /// and could not be told from empty. Widening the bar and dropping the digits
+  /// leaves one expression per quantity. The exact figure lives in the tooltip and
+  /// in the menu, which is where an exact figure is actually wanted.
+  ///
+  /// No tint: colour belongs to session state and nothing else (ADR-0007), so a
+  /// quota at 90% is a longer bar, never a red one.
+  private func quotaCell(_ usage: ToolUsage, minutes: Int, now: Date) -> some View {
+    let reading = usage.reading(forMinutes: minutes, now: now)
+    return HStack(spacing: metrics.caption * 0.45) {
+      Text(usageWindowLabel(minutes: minutes))
+        .foregroundStyle(.tertiary)
+      quotaBar(reading)
+      // `↻` because a window's length and the time until it clears are the same
+      // kind of token — `5h` beside `5h` for a five-hour window clearing in five
+      // hours, `7d` beside `4d`. Two bare durations in one style are not two
+      // facts, they are one unreadable pair.
+      //
+      // The slot keeps its width when there is no countdown to put in it. An
+      // unlimited window has none, and letting that cell collapse dragged
+      // everything after it leftwards — so `7d` sat at a different x on each row
+      // and two rows that should read as a column did not.
+      Text(reading.resetsInText.map { "↻\($0)" } ?? "")
+        .monospacedDigit()
+        .foregroundStyle(.tertiary)
+        .frame(width: quotaClearsWidth, alignment: .leading)
+    }
+    .help(quotaHelp(usage.tool, minutes, reading))
+  }
+
+  /// The bar, or the mark that stands in for one where there is no proportion to
+  /// show: an unlimited window has no length to fill, an unheard one none to
+  /// claim. Drawing either as an empty track would read as "nothing spent yet",
+  /// which is a third, different thing (ADR-0023).
+  ///
+  /// Wide enough that a few percent is a few pixels rather than one — the whole
+  /// point of preferring a length over a number is that small values stay
+  /// distinguishable from zero.
+  private var quotaBarWidth: Double { metrics.caption * 6 }
+
+  /// Room for `↻` plus the longest countdown a window produces — `↻23h`, `↻7d`.
+  /// Reserved rather than measured so every cell is the same width whether or not
+  /// it has a countdown at all.
+  private var quotaClearsWidth: Double { metrics.caption * 2.6 }
+
+  @ViewBuilder
+  private func quotaBar(_ reading: UsageReading) -> some View {
+    let height = max(2, metrics.hairline * 2.5)
+    switch reading {
+    case let .spent(percent, _):
+      Capsule().fill(.quaternary)
+        .frame(width: quotaBarWidth, height: height)
+        .overlay(alignment: .leading) {
+          Capsule().fill(.secondary)
+            .frame(width: quotaBarWidth * min(1, max(0, percent / 100)), height: height)
+        }
+    case .unlimited, .unheard:
+      // The mark keeps the bar's width so a tool with no limits does not drag the
+      // rest of its row leftwards, and sits centred in it: a single glyph pinned
+      // to the leading edge of a wide empty slot reads as something that fell out
+      // of place, where a centred one reads as this slot's content.
+      Text(reading.text)
+        .foregroundStyle(.tertiary)
+        .frame(width: quotaBarWidth, alignment: .center)
+    }
+  }
+
+  /// Says in words what the row says in marks. The countdown appears in both,
+  /// not only here: ADR-0014 rejects anything reachable by hover alone, and an
+  /// earlier draft put the reset time in this tooltip and nowhere else.
   private func quotaHelp(_ tool: ToolKind, _ minutes: Int, _ reading: UsageReading) -> String {
     let window = usageWindowLabel(minutes: minutes)
     switch reading {
-    case .spent:
+    case let .spent(percent, _):
       let clears = reading.resetsInText ?? "?"
-      return "\(tool.label): \(window) window \(reading.text) spent, resets in \(clears)"
+      let spent = percent == 0
+        ? "just reset, nothing spent yet"
+        : "\(Int(percent.rounded()))% spent"
+      return "\(tool.label) · \(window) window — \(spent), clears in \(clears)"
     case .unlimited:
-      return "\(tool.label) reported its limits and \(window) was not one of them"
+      return "\(tool.label) reported its limits and the \(window) window was not one of them"
     case .unheard:
-      return "\(tool.label): the \(window) window has rolled over, and nothing has been measured since"
+      return "\(tool.label) is not reporting quotas — see Settings for how to enable it"
     }
   }
 
@@ -225,6 +432,11 @@ struct DashboardView: View {
       countBadge(monitor.snapshot.counts.waiting, "waiting", Palette.statusWaiting)
       countBadge(monitor.snapshot.counts.idle, "idle", nil)
     }
+    // A hard minimum width. Without this the badges narrow by wrapping their own
+    // labels, and `running` arrives set one letter per line — while still
+    // reporting to `ViewThatFits` that it fitted.
+    .lineLimit(1)
+    .fixedSize()
   }
 
   /// Tinted for the states worth looking at; idle carries no fill at all, so

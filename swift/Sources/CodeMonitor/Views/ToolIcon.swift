@@ -10,6 +10,42 @@
 /// repeat inside a view body that SwiftUI re-evaluates on every scan.
 
 import AppKit
+import SwiftUI
+
+/// The tool's mark, at a given size and weight.
+///
+/// One view for both places that show it — a session card and the quota table.
+/// The card had it inline first; a second copy in the header would have been the
+/// same fact expressed twice, and this repository has paid for that shape more
+/// than once.
+struct ToolMark: View {
+  let tool: ToolKind
+  let size: Double
+  /// Colour is earned. An application icon is drawn to win a Dock, so anywhere it
+  /// is not the thing being read it goes grey — a folded card, or a quota row
+  /// whose job is to be glanced past (ADR-0007).
+  var muted = false
+
+  var body: some View {
+    Group {
+      if let icon = ToolIcon.image(for: tool) {
+        Image(nsImage: icon)
+          .resizable()
+          .interpolation(.high)
+          .aspectRatio(contentMode: .fit)
+          .saturation(muted ? 0 : 1)
+          .opacity(muted ? 0.5 : 1)
+      } else {
+        // No application installed — the CLIs run without one.
+        Image(systemName: tool.symbolName)
+          .font(.system(size: size * 0.95))
+          .foregroundStyle(muted ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.secondary))
+      }
+    }
+    .frame(width: size, height: size)
+    .help(tool.label)
+  }
+}
 
 @MainActor
 enum ToolIcon {

@@ -55,32 +55,52 @@ extension ToolUsage {
   /// limit" is a fact worth showing rather than a blank.
   static let canonicalMinutes = [300, 10_080]
 
-  /// Every window worth a row, shortest first.
+  /// Every window worth a column, shortest first, **across all tools**.
   ///
-  /// The canonical pair plus anything else the tool reported, so a vendor adding
-  /// a window shows up without a change here.
-  var displayedMinutes: [Int] {
-    Set(Self.canonicalMinutes + windows.map(\.minutes)).sorted()
+  /// Shared rather than per-tool so the table is rectangular: a tool with one
+  /// extra window would otherwise push its own row's cells out of line with the
+  /// others, and a column of numbers that does not line up is harder to read
+  /// than no column at all.
+  ///
+  /// A tool that never mentioned a column still gets a cell, and that cell reads
+  /// `∞` — which is exactly right by this ADR's own rule: the tool listed its
+  /// limits and this was not among them.
+  static func columns(across readings: [ToolUsage]) -> [Int] {
+    Set(canonicalMinutes + readings.flatMap { $0.windows.map(\.minutes) }).sorted()
   }
 
   /// The reading for one window length.
   ///
-  /// Three outcomes rather than two, for the reason ADR-0012 gave when it made
-  /// liveness three-valued: `Bool` conflated "confirmed absent" with "could not
-  /// tell", and each confusion produced a defect at an opposite extreme. Here
-  /// they would be `∞` for something merely unobserved and `—` for something
-  /// genuinely unlimited.
+  /// A window the tool never named is `unlimited` — it enumerated its limits and
+  /// this was not among them. Nothing heard from the tool at all is the absence
+  /// of a `ToolUsage`, which the caller renders as `—`.
   ///
-  /// A rolled-over reading is `unheard`, not `0%`. The percentage beside an
-  /// elapsed `resetsAt` describes a window that no longer exists, and claiming a
-  /// fresh window is empty would be measuring it — which nobody did.
+  /// **A rolled-over window reads `0%`, and that number is derived rather than
+  /// reported.** An earlier rule said `—` here, on the grounds that claiming a
+  /// fresh window was empty would be measuring something nobody measured. That
+  /// was over-cautious in a way worth recording: the reset time and the window's
+  /// length together *say* where the new window starts and how much of it has
+  /// elapsed, so zero is a derivation, not an invention — the same standard the
+  /// rest of the model holds (ADR-0012).
+  ///
+  /// The failure mode is real but narrow. A derived `0%` is optimistic: usage may
+  /// have happened since the rollover and no payload has arrived to say so. That
+  /// only occurs while nothing is writing — and nothing writes while nothing is
+  /// running, which is exactly when a quota cannot be about to bite. The stale
+  /// case and the case where it matters do not overlap.
   func reading(forMinutes minutes: Int, now: Date) -> UsageReading {
     guard let window = windows.first(where: { $0.minutes == minutes }) else {
       return .unlimited
     }
     let remaining = window.resetsAt.timeIntervalSince(now)
-    guard remaining > 0 else { return .unheard }
-    return .spent(percent: window.usedPercent, resetsIn: remaining)
+    if remaining > 0 { return .spent(percent: window.usedPercent, resetsIn: remaining) }
+
+    // Rolled over, possibly more than once if nothing has written for a while.
+    // Advance whole windows from the last known boundary rather than from `now`,
+    // so the countdown lands on the vendor's own cadence.
+    let span = TimeInterval(minutes * 60)
+    let elapsedWindows = (-remaining / span).rounded(.down) + 1
+    return .spent(percent: 0, resetsIn: remaining + elapsedWindows * span)
   }
 }
 

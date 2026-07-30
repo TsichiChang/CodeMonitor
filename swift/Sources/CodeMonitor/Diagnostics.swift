@@ -300,10 +300,11 @@ enum Diagnostics {
       print("")
       return
     }
+    let columns = ToolUsage.columns(across: snapshot.usage)
     for reading in snapshot.usage.sorted(by: { $0.tool.rawValue < $1.tool.rawValue }) {
       let age = RelativeSpan.since(reading.observedAt, now: now)
       print("\(reading.tool.label)  (read \(age) ago)")
-      for minutes in reading.displayedMinutes {
+      for minutes in columns {
         let value = reading.reading(forMinutes: minutes, now: now)
         let window = usageWindowLabel(minutes: minutes)
         let clears = value.resetsInText.map { "  resets in \($0)" } ?? ""
