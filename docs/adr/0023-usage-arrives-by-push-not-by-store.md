@@ -120,6 +120,42 @@ Two consequences follow. A percentage is shown only while its own `resets_at` is
 in the future. And after a rollover the honest display is not `0%` — nothing was
 observed about the new window — but no reading at all.
 
+## The file is last-writer-wins, so most of it is unattributable
+
+Captured on this machine, the payload turns out to describe **the session that
+redrew most recently**, which is not necessarily the session anyone is looking at.
+The first capture came from a different project entirely while this conversation
+was running elsewhere.
+
+That splits the fields in two, and only one half is usable:
+
+```
+rate_limits.five_hour / .seven_day     account-level — same for every session ✓
+extra_usage                            account-level ✓ (absent here; see below)
+
+session_id, cwd, workspace, prompt_id  whichever session wrote last  ✗
+context_window.*  (incl. used_percentage, remaining_percentage)      ✗
+cost.total_cost_usd, total_duration_ms                               ✗
+model, effort, version, thinking, vim                                ✗
+```
+
+`context_window.used_percentage` is the tempting one — a context-fill percentage
+per session is exactly what a card could show — and it is precisely what this file
+cannot deliver: it belongs to an arbitrary writer, so displaying it against any
+named session would attribute one session's numbers to another. Reading it here
+would be the ADR-0002 error in a new place, a value standing in for an identity it
+does not have.
+
+**So this channel is read for `rate_limits` and nothing else.** One file per
+session would fix it — the hook store's shape — but the status line has no
+per-session output path we control, and the account-level numbers are all this
+ADR wanted.
+
+`extra_usage` is absent from the captured payload although the local script reads
+it, which fits `cachedExtraUsageDisabledReason: org_level_disabled` in
+`~/.claude.json`. Every field has to be treated as optional; a missing one means
+"not applicable to this account", not "zero".
+
 ## What reaches the screen
 
 Not a session card. Usage is a property of the account, not of any session, and
@@ -156,8 +192,24 @@ after its window has rolled. If that fraction is large, the display is mostly
 showing expired windows and the honest answer is to show nothing but the reset
 time.
 
-Honestly marked: **the payload has not been captured on this machine.** The field
-names come from the official schema and from the local script that reads them, not
-from an observed write — capturing one means adding the line above to a file this
-app must not modify on its own. Until it is captured, the field names are
-documentation, not observation.
+**The payload has since been captured**, which settles the part of this that was
+documentation rather than observation. The schema matches the published one
+exactly:
+
+```json
+"rate_limits": {
+  "five_hour": { "used_percentage": 28.000000000000004, "resets_at": 1785410400 },
+  "seven_day": { "used_percentage": 59,                 "resets_at": 1785798000 }
+}
+```
+
+Two things the capture taught that reading the schema did not. `resets_at` is
+seconds, and the five-hour value is the earlier of the two, so the pair is
+internally consistent. And `used_percentage` arrives as an unrounded double —
+`28.000000000000004` — so it is a float to be formatted, never a string to be
+shown.
+
+What remains unobserved is the rollover: no capture yet spans a `resets_at`
+passing, so "the percentage describes a window that no longer exists" is still
+reasoning rather than something seen. That is the one thing the state file's own
+history will show first, and it is cheap to wait for.
