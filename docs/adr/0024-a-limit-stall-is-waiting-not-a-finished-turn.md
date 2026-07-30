@@ -17,13 +17,25 @@ This is ADR-0018's defect arriving through a door nobody had checked. That ADR
 was written because folding on a finished turn "was playing the most important
 thing that happens as a disappearance"; the same fold now hides a stall.
 
-It is not rare. Across 857 transcripts:
+It is not rare. Counting **records**, not mentions, across 857 transcripts:
 
 ```
-"hit your session limit · resets"    975   the five-hour window
-"reached your Fable 5 limit"          50   model-specific
-"reached your usage limit"             3
+36   session limit   (the five-hour window)
+ 6   model limit     ("reached your Fable 5 limit")
+──
+42   records, 2026-07-02 → 07-29, in 25 transcripts — about 1.5 a day
 ```
+
+> **How that number was wrong twice.** An earlier draft said five events, from a
+> grep that matched only the model-limit phrasing. Its correction said 1,028, from
+> counting *string occurrences* — the phrase appears 1,099 times across the corpus
+> in prose, quoted logs, subagent output and this investigation's own searches.
+> Both times the thing counted was mentions of the message rather than records
+> carrying it, and the two errors ran in opposite directions by roughly 25×.
+>
+> A record is structurally identifiable — `isApiErrorMessage` true, the text in a
+> content block — and that is what has to be counted when the count is a
+> falsification baseline. `grep | wc -l` answers a different question.
 
 **The decision: a session stopped by a usage limit is `waiting`.** It matches what
 `CONTEXT.md` already defines — the agent has stopped and cannot continue without
@@ -50,8 +62,15 @@ rollout's `rate_limits` (ADR-0023) — so nothing has to be parsed out of prose.
 And `spend_control_reached` looks like a second flag and is not: it is `null` in
 all 4,258 rate-limit events on this machine.
 
-Twenty-one such events exist here, which makes the same retroactive check
-available on both sides.
+The corpora are the mirror image of the detectors, which is worth noticing before
+relying on either. Codex gives a robust code and **two** records to test it
+against; Claude gives fragile prose and forty-two. So the tool whose detection
+could silently rot is the one with evidence, and the tool that cannot rot has
+almost none — a retroactive check on the Codex side proves that two known records
+parse, and nothing about the shapes it has never seen.
+
+(Twenty-one is the count of the phrase, not of records. Same error as above,
+same correction.)
 
 ## `isApiErrorMessage` is not the discriminator — for Claude
 
@@ -170,15 +189,30 @@ invisible on every surface.
 
 ## How this gets falsified
 
-The regression test is the history rather than a constructed case: **1,028 records
-already on disk** are read as `turnComplete` today, and after the change every one
-must read `waiting`. That is stronger than anything in `--selftest`, where each
-assertion stands for one defect seen once — and it costs nothing to re-run, since
-the corpus only grows.
+The regression test is the history rather than a constructed case: **44 records
+already on disk** — 42 for Claude, 2 for Codex — are read as `turnComplete` today,
+and after the change every one must read `waiting`. Each distinct *shape* among
+them earns a `--selftest` case, so the assertion survives the corpus being
+unavailable; the corpus itself is the wider sweep, run by hand.
+
+Three shapes exist on the Claude side, and only two are the event:
+
+```
+assistant / stop_sequence / isApiErrorMessage=true    42   ← the stall
+user      / no stop_reason / no flag                   9   ← something else
+```
+
+Those nine are the message appearing in a user record without the flag. They are
+deliberately not detected: `activity` reads a user record as `turnInFlight`, and
+changing that on the strength of matched text would make prose in a conversation
+able to set a session's state — the failure mode `isApiErrorMessage` exists to
+avoid. If a session's *tail* ever lands on one of those nine, it reads `running`
+until it ages out, which is under-reporting and the direction this ADR already
+accepts.
 
 The mislabelling itself is certain — it follows from the mapping in
-`ClaudeSource.activity`, which is code rather than observation. What twenty-four
-days of data cannot settle is whether showing it correctly saves any time. The
-base rate is high enough that a week of running will say something, which is the
-opposite of what an earlier draft concluded from a five-event sample it had
-mistaken for the whole.
+`ClaudeSource.activity`, which is code rather than observation. What the data
+cannot settle is whether showing it correctly saves any time. At about 1.5 records
+a day a week will say something, though that rate is the *corrected* one; the
+figure this section carried until now was the phrase's occurrence count and was
+wrong by roughly 25×.
