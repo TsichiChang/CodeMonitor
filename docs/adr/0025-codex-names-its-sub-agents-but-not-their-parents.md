@@ -106,6 +106,28 @@ The two tools' delegation vocabularies stay separate in the adapters and converg
 only at `isDelegated`, which is what ADR-0004 asks for: each source says what its
 own data supports, and the scanner reads one boolean.
 
+## The folding it plugs into has no ADR of its own
+
+Worth recording because it explains how a whole tool went without delegation
+detection and nothing caught it.
+
+`foldDelegated` is a real decision — replace delegated agents with a count on the
+session that spawned them, because "listing them individually buries the sessions a
+person is actually sitting in front of, which is the one thing this display must
+not do". It cites ADR-0007 for that last clause, and ADR-0007 is about idle
+sessions being dim. The folding itself lives in a doc comment and the README, and
+in no ADR at all. This one is the first to discuss it.
+
+That is the same gap ADR-0021 filled for `withholdingFirstSightings`: a
+load-bearing rule with no entry, so nothing to check an implementation against.
+Had it been written down, "delegated agents fold into a count" would have been a
+claim about the app, and `CodexSource` having no `isDelegated` would have been a
+visible contradiction rather than an absence nobody could see.
+
+This ADR does not adopt the folding decision — it is about detecting delegation for
+one tool, and swallowing the older decision would put two things in one entry
+again. It records that the entry is missing.
+
 ## How this gets falsified
 
 The count is the test, and it was available before and after — 87 of 109 rollouts
