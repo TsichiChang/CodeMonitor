@@ -34,6 +34,31 @@ struct MenuBarContent: View {
 
     Divider()
 
+    // Quota windows, one row per tool per window (ADR-0023). Unlike the
+    // dashboard's line this has room for the reset time, and the menu is where
+    // the number is *consulted* — you open it to decide whether to start
+    // something big, which is the one moment the figure changes a decision.
+    //
+    // Not clickable: there is nothing to do to a quota. Disabled buttons are how
+    // a SwiftUI menu says "this is a reading, not a control".
+    if monitor.snapshot.usage.isEmpty {
+      Button("Usage — no tool is reporting") {}.disabled(true)
+    } else {
+      let now = Date()
+      ForEach(monitor.snapshot.usage.sorted { $0.tool.rawValue < $1.tool.rawValue }, id: \.tool) {
+        usage in
+        ForEach(usage.displayedMinutes, id: \.self) { minutes in
+          let reading = usage.reading(forMinutes: minutes, now: now)
+          let window = usageWindowLabel(minutes: minutes)
+          let tail = reading.resetsInText.map { " · resets in \($0)" } ?? ""
+          Button("\(usage.tool.label)  \(window)  \(reading.text)\(tail)") {}
+            .disabled(true)
+        }
+      }
+    }
+
+    Divider()
+
     // Hiding lives here as well as on the card, because the card may be on a
     // display nobody can reach — an ambient surface is looked at, not pointed
     // at (ADR-0014). Low-frequency action, so a submenu is the right cost.

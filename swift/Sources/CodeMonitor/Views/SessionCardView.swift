@@ -271,14 +271,10 @@ struct SessionCardView: View {
     return short
   }
 
+  /// Kept as the name every call site already uses; the arithmetic moved to
+  /// `RelativeSpan` so the quota countdown formats identically (ADR-0023).
   static func relativeTime(_ date: Date, now: Date = Date()) -> String {
-    let seconds = max(0, Int(now.timeIntervalSince(date).rounded()))
-    if seconds < 60 { return "\(seconds)s" }
-    let minutes = Int((Double(seconds) / 60).rounded())
-    if minutes < 60 { return "\(minutes)m" }
-    let hours = Int((Double(minutes) / 60).rounded())
-    if hours < 24 { return "\(hours)h" }
-    return "\(Int((Double(hours) / 24).rounded()))d"
+    RelativeSpan.since(date, now: now)
   }
 }
 

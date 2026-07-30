@@ -59,7 +59,10 @@ struct DashboardView: View {
       // Centred once the cards are a single column, right-aligned otherwise:
       // with one column there is no right edge for it to belong to, and hanging
       // off in the corner reads as a stray rather than as a heading.
-      counts
+      VStack(alignment: .trailing, spacing: metrics.cardSpacing * 0.5) {
+        counts
+        quotas
+      }
         .frame(maxWidth: .infinity, alignment: columnCount == 1 ? .center : .trailing)
         .padding(.horizontal, metrics.edgePadding)
         .padding(.top, metrics.edgePadding * 0.5)
@@ -144,6 +147,76 @@ struct DashboardView: View {
     // ordinary scan, which changes elapsed times every couple of seconds, moves
     // nothing at all.
     .animation(.smooth(duration: 0.42), value: monitor.snapshot.stateSignature)
+  }
+
+  /// Quota windows, one line per tool (ADR-0023).
+  ///
+  /// Grouped by tool because the numbers are not comparable: Claude's five-hour
+  /// window and Codex's seven-day one are different accounts on different plans,
+  /// and setting them side by side under a shared heading would invite reading a
+  /// difference that does not exist.
+  ///
+  /// The dimmest thing in the header, deliberately. It moves slowly, it is
+  /// consulted rather than watched, and on a display whose scarcest resource is
+  /// attention it has to sit below the counts in every sense (ADR-0007). The
+  /// moment a quota actually bites, the session that hit it goes `waiting` and
+  /// the band lights — so the loud channel already exists and this one does not
+  /// need to compete for it (ADR-0024).
+  @ViewBuilder
+  private var quotas: some View {
+    // Nothing at all when no tool is reporting, rather than an empty row. An
+    // empty `HStack` would still claim the stack's spacing, and the ticker below
+    // would still wake every five seconds to draw it — a cost with nothing on
+    // the other side. The menu says why it is missing; the header stays quiet.
+    if !monitor.snapshot.usage.isEmpty {
+      // Driven by a clock rather than by the scan, like a card's elapsed time:
+      // the countdown has to keep falling between scans, and at the slow cadence
+      // a scan can be fifteen seconds away.
+      TimelineView(.periodic(from: .now, by: 5)) { context in
+        HStack(spacing: metrics.cardSpacing * 1.6) {
+          ForEach(orderedUsage, id: \.tool) { usage in
+            quotaRow(usage, now: context.date)
+          }
+        }
+        .font(.system(size: metrics.caption))
+      }
+    }
+  }
+
+  /// Stable order, so two tools never trade places between scans — the same rule
+  /// the session list follows for the same reason (ADR-0013).
+  private var orderedUsage: [ToolUsage] {
+    monitor.snapshot.usage.sorted { $0.tool.rawValue < $1.tool.rawValue }
+  }
+
+  private func quotaRow(_ usage: ToolUsage, now: Date) -> some View {
+    HStack(spacing: metrics.caption * 0.5) {
+      Text(usage.tool.label)
+        .foregroundStyle(.quaternary)
+      ForEach(usage.displayedMinutes, id: \.self) { minutes in
+        let reading = usage.reading(forMinutes: minutes, now: now)
+        Text("\(usageWindowLabel(minutes: minutes)) \(reading.text)")
+          .monospacedDigit()
+          .foregroundStyle(.tertiary)
+          .help(quotaHelp(usage.tool, minutes, reading))
+      }
+    }
+  }
+
+  /// The countdown lives here rather than on screen. A reset time is what you
+  /// act on once, when deciding to wait or switch — not something to read every
+  /// time your eye crosses the header.
+  private func quotaHelp(_ tool: ToolKind, _ minutes: Int, _ reading: UsageReading) -> String {
+    let window = usageWindowLabel(minutes: minutes)
+    switch reading {
+    case .spent:
+      let clears = reading.resetsInText ?? "?"
+      return "\(tool.label): \(window) window \(reading.text) spent, resets in \(clears)"
+    case .unlimited:
+      return "\(tool.label) reported its limits and \(window) was not one of them"
+    case .unheard:
+      return "\(tool.label): the \(window) window has rolled over, and nothing has been measured since"
+    }
   }
 
   private var counts: some View {

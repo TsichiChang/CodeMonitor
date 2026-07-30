@@ -46,7 +46,11 @@ actor SessionScanner {
     return SessionSnapshot(
       sessions: sessions,
       generatedAt: now,
-      processScanOk: scanOK
+      processScanOk: scanOK,
+      // Two small file reads, and neither is on the poll's critical path: one is
+      // a 1.3 KB snapshot, the other a 64 KB tail that is already being read for
+      // the newest rollout's session state.
+      usage: UsageStore.readings(now: now)
     )
   }
 

@@ -232,6 +232,40 @@ The ambient band is not involved. ADR-0015 established that the band carries no
 content and lights only for something needing the user *now*; a window at 41% is
 not that. An exhausted window stalls a session, and that is ADR-0024's business.
 
+### The form, settled
+
+**Always present, on both surfaces.** A threshold was considered — show nothing
+until a window is nearly spent, on the grounds that a slowly-moving number becomes
+furniture, which is the argument ADR-0022 makes against a permanently lit band.
+Rejected, and the reason is that the two cases are not alike: the band *competes*
+for peripheral attention, so an always-on one drowns the signal it exists to
+carry. A dim figure in a header competes with nothing. Hiding it until it is
+urgent would also mean it is absent at the only moment it is useful — planning,
+which happens long before 90%.
+
+**Grouped by tool, one row each.** Setting Claude's five-hour window beside
+Codex's under a shared heading would invite reading a difference between two
+numbers that share no denominator.
+
+**Windows keyed by length, never by slot.** Codex fills `primary` and `secondary`
+positionally: on this machine `primary` was the seven-day window 3,799 times and
+the five-hour window 307, so a reader keyed on the slot would report a different
+quantity depending on when it looked. `window_minutes` is the only thing that
+says which is which.
+
+**Relative countdown, and not in the header.** "resets in 2h" answers *wait or
+switch* directly, where "8:20pm" needs arithmetic — and it shares one formatter
+with a card's elapsed time, so the two cannot disagree about whether 119 seconds
+is one minute or two. The header carries only the percentage; the countdown lives
+in the menu and the tooltip, because a reset time is acted on once rather than
+read every time an eye crosses the header.
+
+**The menu-bar icon is untouched.** It is tinted by the most urgent session state,
+and mixing a quota into that would conflate two unrelated things. Nothing is lost:
+when a quota actually bites, the session that hit it goes `waiting` and the band
+lights (ADR-0024), so the loud channel already exists and this one is free to stay
+quiet.
+
 ## Consequences
 
 Two reporting channels with different shapes, so the adapters stay asymmetric —

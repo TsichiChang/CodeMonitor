@@ -272,6 +272,12 @@ struct SessionSnapshot: Sendable {
   var generatedAt = Date()
   /// True when process scanning (ps/lsof) succeeded this cycle.
   var processScanOk = false
+  /// What each tool last said about its own quota windows (ADR-0023).
+  ///
+  /// Account-level, so it sits on the snapshot rather than on any session. A
+  /// tool missing from here has said nothing, which is what makes `—` mean
+  /// something different from `∞`.
+  var usage: [ToolUsage] = []
 
   static let empty = SessionSnapshot()
 

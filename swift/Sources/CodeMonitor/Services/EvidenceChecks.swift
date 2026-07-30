@@ -609,6 +609,76 @@ enum EvidenceChecks {
     return failures
   }
 
+  /// Quota readings: three outcomes, and the slot-versus-length trap (ADR-0023).
+  static func runUsageChecks() -> Int {
+    let now = Date()
+    var failures = 0
+    func check(_ name: String, _ passed: Bool) {
+      failures += Self.report(name, passed)
+    }
+
+    let fiveHour = UsageWindow(
+      minutes: 300, usedPercent: 60, resetsAt: now.addingTimeInterval(2 * 3600))
+    let rolled = UsageWindow(
+      minutes: 10_080, usedPercent: 62, resetsAt: now.addingTimeInterval(-60))
+    let usage = ToolUsage(tool: .claude, windows: [fiveHour, rolled], observedAt: now)
+
+    check(
+      "a live window reads as its percentage",
+      usage.reading(forMinutes: 300, now: now).text == "60%")
+    check(
+      // Codex withdrew its five-hour window in July 2026. "No five-hour limit"
+      // is a fact the tool stated by listing its limits without it.
+      "a window the tool never mentioned is unlimited, not unknown",
+      usage.reading(forMinutes: 720, now: now) == .unlimited)
+    check(
+      // Not 0%: a fresh window was not measured at zero, it was not measured.
+      "a window whose reset has passed is unheard, not empty",
+      usage.reading(forMinutes: 10_080, now: now) == .unheard)
+    check(
+      "an elapsed window shows no countdown",
+      usage.reading(forMinutes: 10_080, now: now).resetsInText == nil)
+    check(
+      "the canonical pair is asked about even when only one was reported",
+      ToolUsage(tool: .claude, windows: [fiveHour], observedAt: now)
+        .displayedMinutes == [300, 10_080])
+    check(
+      "and a window nobody anticipated still gets a row, in length order",
+      ToolUsage(
+        tool: .codex,
+        windows: [UsageWindow(minutes: 720, usedPercent: 1, resetsAt: now)],
+        observedAt: now
+      ).displayedMinutes == [300, 720, 10_080])
+
+    // The trap. `primary` was the seven-day window 3,799 times on this machine
+    // and the five-hour window 307 times, so a reader keyed on the slot name
+    // would report a different quantity depending on when it looked. Both
+    // orderings must come out keyed by length.
+    let sevenDayFirst = #"""
+      {"payload":{"type":"token_count","rate_limits":{"primary":{"used_percent":18.0,"window_minutes":10080,"resets_at":1785914691},"secondary":null}}}
+      """#
+    let fiveHourFirst = #"""
+      {"payload":{"type":"token_count","rate_limits":{"primary":{"used_percent":41.0,"window_minutes":300,"resets_at":1785914691},"secondary":{"used_percent":18.0,"window_minutes":10080,"resets_at":1785914691}}}}
+      """#
+    check(
+      "a lone primary slot is read as the window it declares",
+      TranscriptReader.parseCodexRateLimits(sevenDayFirst)?.map(\.minutes) == [10_080])
+    check(
+      "and primary holding the five-hour window does not become the weekly one",
+      TranscriptReader.parseCodexRateLimits(fiveHourFirst)?
+        .sorted { $0.minutes < $1.minutes }.map { "\($0.minutes):\(Int($0.usedPercent))" }
+        == ["300:41", "10080:18"])
+    check(
+      "the newest rate_limits wins over an earlier one in the same tail",
+      TranscriptReader.parseCodexRateLimits(sevenDayFirst + "\n" + fiveHourFirst)?
+        .count == 2)
+
+    check("300 minutes reads as 5h", usageWindowLabel(minutes: 300) == "5h")
+    check("10080 reads as 7d", usageWindowLabel(minutes: 10_080) == "7d")
+
+    return failures
+  }
+
   /// Runs the tables. Returns the number of failures.
   static func run() -> Int {
     let now = Date()

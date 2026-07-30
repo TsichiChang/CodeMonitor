@@ -93,6 +93,7 @@ enum Diagnostics {
         + EvidenceChecks.runGrantChecks() + EvidenceChecks.runDirectoryChecks()
         + EvidenceChecks.runHookMergeChecks() + EvidenceChecks.runSightingChecks()
         + EvidenceChecks.runVisitChecks() + EvidenceChecks.runUnreadChecks()
+        + EvidenceChecks.runUsageChecks()
         + Metrics.runChecks()
       print(
         failures == 0
@@ -275,6 +276,7 @@ enum Diagnostics {
       print("")
     }
 
+    reportUsage(snapshot, now: snapshot.generatedAt)
     reportSources(now: snapshot.generatedAt)
   }
 
@@ -283,6 +285,40 @@ enum Diagnostics {
   /// A session missing from the list above is either absent from its tool's
   /// store or aged out of the active window, and those need different fixes —
   /// this separates them.
+  /// Quota windows per tool, and which channel each came from.
+  ///
+  /// Worth printing separately from the sessions because the failure modes are
+  /// different and both are silent: a Claude reading needs a line in the user's
+  /// own status-line script, and a Codex one needs a rollout recent enough to
+  /// still hold a `token_count` event in its tail (ADR-0023).
+  private static func reportUsage(_ snapshot: SessionSnapshot, now: Date) {
+    print("── Usage ──")
+    if snapshot.usage.isEmpty {
+      print("No tool reported a quota window.")
+      print("  Claude reads \(UsageStore.claudeFile.path)")
+      print("  — written by your own statusline script; see --hooks")
+      print("")
+      return
+    }
+    for reading in snapshot.usage.sorted(by: { $0.tool.rawValue < $1.tool.rawValue }) {
+      let age = RelativeSpan.since(reading.observedAt, now: now)
+      print("\(reading.tool.label)  (read \(age) ago)")
+      for minutes in reading.displayedMinutes {
+        let value = reading.reading(forMinutes: minutes, now: now)
+        let window = usageWindowLabel(minutes: minutes)
+        let clears = value.resetsInText.map { "  resets in \($0)" } ?? ""
+        let note =
+          switch value {
+          case .spent: ""
+          case .unlimited: "   ← not one of this tool's limits"
+          case .unheard: "   ← window rolled over; nothing measured since"
+          }
+        print("    \(window.padding(toLength: 4, withPad: " ", startingAt: 0)) \(value.text)\(clears)\(note)")
+      }
+    }
+    print("")
+  }
+
   private static func reportSources(now: Date) {
     print("── Sources ──")
 
