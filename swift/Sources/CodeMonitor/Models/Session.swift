@@ -43,10 +43,17 @@ enum SessionState: String, Sendable, Hashable {
   case waiting
   case idle
 
+  /// The state's own name, claiming no cause.
+  ///
+  /// This used to read "Waiting approval", which was true while a permission
+  /// prompt was the only way to reach `waiting`. A usage limit reaches it too
+  /// (ADR-0024), and that card is not waiting for anybody's approval. Naming the
+  /// cause is `SessionInfo.statusLabel`'s job, because the cause lives in the
+  /// evidence and a state cannot see it.
   var label: String {
     switch self {
     case .running: "Running"
-    case .waiting: "Waiting approval"
+    case .waiting: "Waiting"
     case .idle: "Idle"
     }
   }
@@ -193,11 +200,31 @@ struct SessionInfo: Identifiable, Sendable, Hashable {
 
   // `deservesAttention` used to sit here, gating the pulse on whether a
   // `waiting` had been reported or merely guessed at. It has been a constant
-  // `true` since ADR-0020: `blockedOnUser` is emitted by the hook store alone,
-  // and `waiting` is derived from nothing else, so no inferred block exists to
-  // withhold anything from. Keeping it would have kept the *design* it encodes
-  // — that guesses exist and are handled by drawing them faintly — which is the
-  // answer ADR-0020 rejected in favour of not guessing at all.
+  // `true` since ADR-0020, and remains one — but not for the reason first
+  // written here, which was that `blockedOnUser` came from the hook store alone.
+  // ADR-0024 added a second reporter, so "only one source" is no longer true;
+  // "only a *report*" still is, and that is what made the gate pointless.
+  // Keeping it would have kept the design it encodes — that guesses exist and
+  // are handled by drawing them faintly — which is the answer ADR-0020 rejected
+  // in favour of not guessing at all.
+
+  /// What the card says the session is doing.
+  ///
+  /// The state names itself; the activity says why, and only for `waiting`,
+  /// which is the one state with two causes that ask different things of the
+  /// user. A permission prompt wants an answer here; a usage limit wants time,
+  /// a different model, or credits — and telling the second it is "waiting
+  /// approval" is simply false (ADR-0024).
+  ///
+  /// Derived rather than stored, so it cannot disagree with the state it
+  /// describes.
+  var statusLabel: String {
+    switch (state, evidence.activity) {
+    case (.waiting, .blockedOnLimit): "Rate limited"
+    case (.waiting, _): "Waiting approval"
+    default: state.label
+    }
+  }
 
   /// Short human snippet describing the latest activity.
   var lastMessage: String?

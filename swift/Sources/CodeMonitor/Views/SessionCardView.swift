@@ -240,7 +240,7 @@ struct SessionCardView: View {
 
   private var statusRow: some View {
     HStack(spacing: metrics.cardSpacing) {
-      StatusPill(state: session.state)
+      StatusPill(label: session.statusLabel)
       if session.subagentCount > 0 {
         Label("\(session.subagentCount)", systemImage: "circle.hexagongrid")
           .font(.system(size: metrics.caption))

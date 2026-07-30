@@ -8,6 +8,30 @@
 import Foundation
 
 enum EvidenceChecks {
+  /// How many assertions actually ran.
+  ///
+  /// The `--selftest` total used to be a sum of literals in `Diagnostics` — one
+  /// per check function — which is the same fact written twice and went stale
+  /// the first time an assertion was added without editing the arithmetic.
+  /// Everything that prints a ✓ or a ✗ passes through `report` or bumps this, so
+  /// the number cannot disagree with what was run.
+  private nonisolated(unsafe) static var ranCount = 0
+  static var ran: Int { ranCount }
+
+  /// One assertion's result: printed, counted, and worth 1 failure or 0.
+  static func report(_ name: String, _ passed: Bool) -> Int {
+    ranCount += 1
+    if passed {
+      print("  ✓ \(name)")
+      return 0
+    }
+    print("  ✗ \(name)")
+    return 1
+  }
+
+  /// Counts a check whose own output is more detailed than `report` prints.
+  private static func counted() { ranCount += 1 }
+
   struct Case {
     let name: String
     let evidence: Evidence
@@ -30,6 +54,18 @@ enum EvidenceChecks {
       name: "a permission prompt blocks",
       evidence: Evidence(.blockedOnUser, at: .distantPast, source: .reported, liveness: .alive),
       age: 60, expectedState: .waiting, expectedCurrent: true),
+    .init(
+      // Same state, different remedy. Before ADR-0024 this read `idle`: a card
+      // folded to a dim line about a turn that had stopped mid-task.
+      name: "a usage limit blocks just as hard",
+      evidence: Evidence(.blockedOnLimit, at: .distantPast, source: .reported, liveness: .alive),
+      age: 60, expectedState: .waiting, expectedCurrent: true),
+    .init(
+      // Lifetime follows liveness alone, so a limit stall outlasts its window
+      // for the same reason a permission prompt outlasts a long build.
+      name: "and keeps its card for as long as the agent is alive",
+      evidence: Evidence(.blockedOnLimit, at: .distantPast, source: .reported, liveness: .alive),
+      age: 6 * 60 * 60, expectedState: .waiting, expectedCurrent: true),
 
     // A reported turn does not decay into a guessed block: a hook would have
     // said so. A long tool call is still running.
@@ -142,6 +178,44 @@ enum EvidenceChecks {
       """#,
       .turnInFlight
     ),
+    // A usage limit, in the three shapes the corpus actually holds. All were
+    // read as `turnComplete` before ADR-0024 — a card folded to a dim line
+    // saying "nothing to do here" about a turn cut off mid-task.
+    (
+      "the five-hour limit stops the turn, it does not finish it",
+      #"""
+      {"type":"assistant","isApiErrorMessage":true,"message":{"role":"assistant","model":"<synthetic>","stop_reason":"stop_sequence","content":[{"type":"text","text":"You've hit your session limit · resets 8:20pm (Asia/Shanghai)"}]}}
+      """#,
+      .blockedOnLimit
+    ),
+    (
+      "so does a model limit, which names no reset time",
+      #"""
+      {"type":"assistant","isApiErrorMessage":true,"message":{"role":"assistant","model":"<synthetic>","stop_reason":"stop_sequence","content":[{"type":"text","text":"You've reached your Fable 5 limit. Run /usage-credits to continue or switch models with /model."}]}}
+      """#,
+      .blockedOnLimit
+    ),
+    (
+      // 85 of the 124 flagged records here are one of these. A dropped
+      // connection retries itself and a login failure needs a different
+      // remedy, so neither is a session to wait out.
+      "an authentication failure carries the same flag and is not a limit",
+      #"""
+      {"type":"assistant","isApiErrorMessage":true,"message":{"role":"assistant","stop_reason":"stop_sequence","content":[{"type":"text","text":"Failed to authenticate. API Error: 401 Invalid bearer token"}]}}
+      """#,
+      .turnComplete
+    ),
+    (
+      // The text without the flag, which is how the message appears in nine
+      // records here. Detecting on words alone would let a conversation *about*
+      // usage limits set a session's state — and this repository has had exactly
+      // that conversation.
+      "the same words in a user record are not evidence of anything",
+      #"""
+      {"type":"user","message":{"role":"user","content":[{"type":"text","text":"You've hit your session limit · resets 8:20pm (Asia/Shanghai)"}]}}
+      """#,
+      .turnInFlight
+    ),
     (
       "end_turn completes the turn",
       #"""
@@ -151,8 +225,39 @@ enum EvidenceChecks {
     ),
   ]
 
+  /// Codex rollout events, which name their conditions with codes rather than
+  /// prose — so this table needs no wording to stay true (ADR-0024).
+  ///
+  /// The corpora are the mirror image of the detectors and it is worth stating
+  /// where the assertions live: two `usage_limit_exceeded` records exist on this
+  /// machine against forty-two on the Claude side, so the robust detector is the
+  /// one with almost nothing to check it against.
+  static let codexCases: [(name: String, line: String, expected: Activity)] = [
+    (
+      "a usage limit stops the turn, by code rather than by wording",
+      #"""
+      {"payload":{"type":"error","message":"You've hit your usage limit. Upgrade to Plus to continue using Codex, or try again at Apr 18th, 2026 3:03 PM.","codex_error_info":"usage_limit_exceeded"}}
+      """#,
+      .blockedOnLimit
+    ),
+    (
+      "an error with any other code is not a limit",
+      #"""
+      {"payload":{"type":"error","message":"stream disconnected before completion","codex_error_info":"stream_error"}}
+      """#,
+      .turnInFlight
+    ),
+    (
+      "task_complete still ends the turn",
+      #"{"payload":{"type":"task_complete","last_agent_message":"done"}}"#,
+      .turnComplete
+    ),
+  ]
+
   /// Everything `--selftest` checks: derivation, hook events, transcript records.
-  static var count: Int { cases.count + hookEvents.count + transcriptCases.count }
+  static var count: Int {
+    cases.count + hookEvents.count + transcriptCases.count + codexCases.count
+  }
 
   /// Ordering has to be stable within a state, or cards trade places on their
   /// own. Two running sessions whose last activity differs — and moves, as a
@@ -172,7 +277,7 @@ enum EvidenceChecks {
 
     var failures = 0
     func check(_ name: String, _ passed: Bool) {
-      if passed { print("  ✓ \(name)") } else { failures += 1; print("  ✗ \(name)") }
+      failures += Self.report(name, passed)
     }
 
     let freshFirst = [session("alpha", .running, agoSeconds: 1),
@@ -248,6 +353,7 @@ enum EvidenceChecks {
 
     var failures = 0
     for testCase in cases {
+      counted()
       let actual = ProcessScanner.tool(forArguments: testCase.argv)
       if actual == testCase.expected {
         print("  ✓ \(testCase.name)")
@@ -266,7 +372,7 @@ enum EvidenceChecks {
   static func runHostChecks() -> Int {
     var failures = 0
     func check(_ name: String, _ passed: Bool) {
-      if passed { print("  ✓ \(name)") } else { failures += 1; print("  ✗ \(name)") }
+      failures += Self.report(name, passed)
     }
 
     check(
@@ -316,7 +422,7 @@ enum EvidenceChecks {
 
     var failures = 0
     func check(_ name: String, _ passed: Bool) {
-      if passed { print("  ✓ \(name)") } else { failures += 1; print("  ✗ \(name)") }
+      failures += Self.report(name, passed)
     }
 
     check(
@@ -356,7 +462,7 @@ enum EvidenceChecks {
     }
     var failures = 0
     func check(_ name: String, _ passed: Bool) {
-      if passed { print("  ✓ \(name)") } else { failures += 1; print("  ✗ \(name)") }
+      failures += Self.report(name, passed)
     }
 
     check(
@@ -382,7 +488,7 @@ enum EvidenceChecks {
   static func runUnreadChecks() -> Int {
     var failures = 0
     func check(_ name: String, _ passed: Bool) {
-      if passed { print("  ✓ \(name)") } else { failures += 1; print("  ✗ \(name)") }
+      failures += Self.report(name, passed)
     }
     func evidence(_ activity: Activity, _ source: EvidenceSource = .reported) -> Evidence {
       Evidence(activity, at: Date(), source: source)
@@ -415,7 +521,7 @@ enum EvidenceChecks {
     let now = Date()
     var failures = 0
     func check(_ name: String, _ passed: Bool) {
-      if passed { print("  ✓ \(name)") } else { failures += 1; print("  ✗ \(name)") }
+      failures += Self.report(name, passed)
     }
 
     // The session these belong to is deliberately not passed — the function
@@ -446,6 +552,7 @@ enum EvidenceChecks {
     ]
     var failures = 0
     for (name, path, expected) in cases {
+      counted()
       if SessionScanner.namesNoProject(path, home: home) == expected {
         print("  ✓ \(name)")
       } else {
@@ -463,7 +570,7 @@ enum EvidenceChecks {
       .blockedOnUser, at: now.addingTimeInterval(-60), source: .reported, liveness: .alive)
     var failures = 0
     func check(_ name: String, _ passed: Bool) {
-      if passed { print("  ✓ \(name)") } else { failures += 1; print("  ✗ \(name)") }
+      failures += Self.report(name, passed)
     }
 
     check(
@@ -481,6 +588,24 @@ enum EvidenceChecks {
       "a running turn is left alone",
       Evidence(.turnInFlight, at: now, source: .reported)
         .resolvingGrant(newestChildStart: now).activity == .turnInFlight)
+
+    // The rule this whole mechanism must not overreach into. A child process
+    // dates a *permission answer*; nothing local clears a quota, so an MCP
+    // server restarting must not flip a stalled card back to `running` — and
+    // because the retraction also rewrites `at`, it would reset the elapsed
+    // time with it (ADR-0024).
+    //
+    // Belt and braces: the guard reads `== .blockedOnUser`, so a distinct
+    // activity makes this unwritable rather than merely wrong. The assertion is
+    // here because that guard is one word away from being "any block".
+    let limited = Evidence(
+      .blockedOnLimit, at: now.addingTimeInterval(-60), source: .reported, liveness: .alive)
+    check(
+      "work starting after a usage limit does not clear it",
+      limited.resolvingGrant(newestChildStart: now).activity == .blockedOnLimit)
+    check(
+      "and its elapsed time is not rewritten either",
+      limited.resolvingGrant(newestChildStart: now).at == limited.at)
     return failures
   }
 
@@ -490,6 +615,7 @@ enum EvidenceChecks {
     var failures = 0
 
     for testCase in cases {
+      counted()
       var evidence = testCase.evidence
       evidence.at = now.addingTimeInterval(-testCase.age)
 
@@ -512,6 +638,7 @@ enum EvidenceChecks {
     }
 
     for (event, expected) in hookEvents {
+      counted()
       let actual = HookStateStore.activity(forEvent: event)
       if actual == expected {
         print("  ✓ \(event ?? "(no event)") → \(expected.rawValue)")
@@ -526,7 +653,19 @@ enum EvidenceChecks {
     // interrupted session in the waiting column was as much about the shape of
     // the record as about the rule applied to it.
     for (name, line, expected) in transcriptCases {
+      counted()
       let actual = ClaudeSource.activity(TranscriptReader.parseClaudeTail(line))
+      if actual == expected {
+        print("  ✓ \(name)")
+      } else {
+        failures += 1
+        print("  ✗ \(name) → expected \(expected.rawValue), got \(actual.rawValue)")
+      }
+    }
+
+    for (name, line, expected) in codexCases {
+      counted()
+      let actual = CodexSource.activity(TranscriptReader.parseCodexTail(line))
       if actual == expected {
         print("  ✓ \(name)")
       } else {

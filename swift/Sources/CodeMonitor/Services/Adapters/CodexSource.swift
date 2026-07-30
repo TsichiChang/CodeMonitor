@@ -61,7 +61,7 @@ final class CodexSource: SessionSource {
       project: origin == "unknown" ? "Codex session" : label(for: origin),
       gitBranch: meta?.gitBranch,
       model: meta?.model,
-      evidence: Evidence(Self.activity(entry), at: mtime, source: .inferred),
+      evidence: Self.evidence(entry, at: mtime),
       state: .idle,
       hostBundleID: Self.hostBundleID(for: meta?.originator),
       lastMessage: entry?.snippet
@@ -82,10 +82,24 @@ final class CodexSource: SessionSource {
     return desktopHosts.first { key.contains($0.key) }?.value
   }
 
-  private static func activity(_ entry: CodexEntry?) -> Activity {
+  /// Not private, so `--selftest` can run real rollout records through it.
+  static func activity(_ entry: CodexEntry?) -> Activity {
+    // A code, not prose. Claude needs its flag *and* its wording matched
+    // because one flag covers limits, 401s and dropped connections alike; Codex
+    // names the condition, so this cannot rot when a message is reworded
+    // (ADR-0024).
+    if entry?.errorCode == "usage_limit_exceeded" { return .blockedOnLimit }
     // `task_complete` is the one event Codex names that settles the question;
     // anything else trailing means the turn is still in flight.
-    entry?.payloadType == "task_complete" ? .turnComplete : .turnInFlight
+    return entry?.payloadType == "task_complete" ? .turnComplete : .turnInFlight
+  }
+
+  /// What the trailing event says, and how much that is worth — see
+  /// `ClaudeSource.evidence` for why the two are decided together.
+  static func evidence(_ entry: CodexEntry?, at observed: Date) -> Evidence {
+    let activity = Self.activity(entry)
+    return Evidence(
+      activity, at: observed, source: activity == .blockedOnLimit ? .reported : .inferred)
   }
 
   // MARK: - Layout

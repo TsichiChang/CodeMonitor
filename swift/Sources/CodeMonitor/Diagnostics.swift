@@ -83,15 +83,20 @@ enum Diagnostics {
       changeHooks(installing: false)
     case "--selftest":
       print("Evidence derivation")
+      // Counted by the checks themselves rather than added up here. The total
+      // used to be a sum of literals — `+ 5 + 9 + 5 + 4 + …`, one per check
+      // function — which is the same fact written in two places, and it went
+      // stale the moment an assertion was added without anyone editing the
+      // arithmetic. Nothing to keep in step now.
       let failures = EvidenceChecks.run() + EvidenceChecks.runOrderingChecks()
         + EvidenceChecks.runProcessChecks() + EvidenceChecks.runHostChecks()
         + EvidenceChecks.runGrantChecks() + EvidenceChecks.runDirectoryChecks()
         + EvidenceChecks.runHookMergeChecks() + EvidenceChecks.runSightingChecks()
         + EvidenceChecks.runVisitChecks() + EvidenceChecks.runUnreadChecks()
         + Metrics.runChecks()
-      let total = EvidenceChecks.count + 5 + 9 + 5 + 4 + 5 + 5 + 3 + 2 + 4
-        + Metrics.checks.count
-      print(failures == 0 ? "\nall \(total) checks pass" : "\n\(failures) FAILED")
+      print(
+        failures == 0
+          ? "\nall \(EvidenceChecks.ran) checks pass" : "\n\(failures) of \(EvidenceChecks.ran) FAILED")
       exit(failures == 0 ? 0 : 1)
     default:
       print(usage)
