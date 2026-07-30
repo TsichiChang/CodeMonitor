@@ -305,7 +305,21 @@ actor SessionScanner {
   /// the session that spawned it, and the directory is the only thing they
   /// demonstrably share.
   private func foldDelegated(_ sessions: [SessionInfo]) -> [SessionInfo] {
-    guard !UserDefaults.standard.bool(forKey: "showDelegatedSessions") else { return sessions }
+    Self.folding(
+      sessions,
+      showDelegated: UserDefaults.standard.bool(forKey: "showDelegatedSessions"))
+  }
+
+  /// The rule, with the setting passed in rather than read.
+  ///
+  /// Split out so `--selftest` can assert on it: the behaviour worth pinning is
+  /// which sessions survive, and reaching that through `UserDefaults` would make
+  /// the assertion depend on the machine it runs on. Same reason
+  /// `retainedVisits` and `applying(_:to:)` are shaped this way.
+  nonisolated static func folding(
+    _ sessions: [SessionInfo], showDelegated: Bool
+  ) -> [SessionInfo] {
+    guard !showDelegated else { return sessions }
     let delegated = sessions.filter(\.isDelegated)
     guard !delegated.isEmpty else { return sessions }
 
@@ -319,8 +333,15 @@ actor SessionScanner {
       kept[index].subagentCount = workingByProject[kept[index].projectPath] ?? 0
     }
 
-    // A batch with no session of its own to hang off still deserves to be
-    // visible — otherwise the work would vanish from the display entirely.
+    // A batch *currently working* with no session of its own to hang off still
+    // deserves to be visible: its parent may have aged out, or may be an
+    // orchestrator this machine never saw.
+    //
+    // Not "otherwise the work would vanish", which is what this said and was
+    // wrong — it iterates `workingByProject`, so a batch whose agents have all
+    // finished is never adopted and does vanish. That is correct (a finished
+    // sub-agent leaves nothing to act on; the display is not a log), but it is
+    // not what the sentence claimed (ADR-0026).
     let adopted = Set(kept.map(\.projectPath))
     for (project, count) in workingByProject where !adopted.contains(project) {
       guard var orphan = delegated.first(where: { $0.projectPath == project }) else { continue }
