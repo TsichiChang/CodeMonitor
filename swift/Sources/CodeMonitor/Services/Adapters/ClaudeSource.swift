@@ -63,7 +63,7 @@ final class ClaudeSource: SessionSource {
       project: label(for: origin),
       gitBranch: entry?.gitBranch,
       model: entry?.model,
-      evidence: Evidence(Self.activity(entry), at: mtime, source: .inferred),
+      evidence: Self.evidence(entry, at: mtime),
       state: .idle,
       // `sdk-*` entrypoints are agents a program started. Claude Code gives each
       // one its own transcript, so a single batch job can mint dozens of them —
@@ -71,6 +71,19 @@ final class ClaudeSource: SessionSource {
       isDelegated: entry?.entrypoint?.hasPrefix("sdk") == true,
       lastMessage: entry?.snippet
     )
+  }
+
+  /// What the trailing record says, and how much that is worth.
+  ///
+  /// One function rather than two reads of the same entry, because the strength
+  /// follows from *which* activity was recognised: a flagged limit stall is the
+  /// tool stating it outright, so it carries `reported` weight even though it
+  /// arrived by transcript (ADR-0024). Everything else here is a guess about the
+  /// shape of a file, which is what `inferred` means.
+  static func evidence(_ entry: ClaudeEntry?, at observed: Date) -> Evidence {
+    let activity = Self.activity(entry)
+    return Evidence(
+      activity, at: observed, source: activity == .blockedOnLimit ? .reported : .inferred)
   }
 
   /// Reads what last happened from the trailing conversation entry.
@@ -82,6 +95,12 @@ final class ClaudeSource: SessionSource {
   /// of what a session without a hook is judged on.
   static func activity(_ entry: ClaudeEntry?) -> Activity {
     guard let entry else { return .unknown }
+
+    // Before the role switch, because a limit stall arrives as an assistant
+    // record with `stop_reason: stop_sequence` and would otherwise read as a
+    // finished turn — folding a card that stopped mid-task into a dim line
+    // saying "nothing to do here" (ADR-0024).
+    if entry.limitReached { return .blockedOnLimit }
 
     switch entry.role {
     case "assistant":

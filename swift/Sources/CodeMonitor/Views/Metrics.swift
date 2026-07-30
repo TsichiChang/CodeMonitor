@@ -97,12 +97,13 @@ extension Metrics {
       // Within a point: these are ratios of an irrational body size, so exact
       // equality was never on offer, and a point is invisible.
       let tolerance = max(1.0, check.was * 0.01)
-      if abs(value - check.was) <= tolerance {
-        print("  ✓ \(check.name), derives \(String(format: "%.1f", value))")
-      } else {
-        failures += 1
-        print("  ✗ \(check.name), derives \(String(format: "%.1f", value))")
-      }
+      // Reported through `EvidenceChecks` rather than printed here, so these ten
+      // are counted by the same counter as everything else. Printing locally is
+      // what made the old total wrong: it summed literals per check function and
+      // silently omitted whichever ones had their own output.
+      failures += EvidenceChecks.report(
+        "\(check.name), derives \(String(format: "%.1f", value))",
+        abs(value - check.was) <= tolerance)
     }
     return failures
   }

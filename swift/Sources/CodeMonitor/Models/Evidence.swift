@@ -17,6 +17,19 @@ enum Activity: String, Sendable, Hashable {
   case turnInFlight
   /// Stopped and unable to continue without the user — a permission prompt.
   case blockedOnUser
+  /// Stopped by a usage limit (ADR-0024).
+  ///
+  /// Also blocked on the user, and deliberately *not* folded into
+  /// `blockedOnUser`, because one thing must treat the two differently: the
+  /// grant retraction below asks "did a child process start after the block",
+  /// which dates a permission answer and says nothing at all about a quota. A
+  /// separate value makes that misfire impossible rather than guarded — the
+  /// guard already reads `== .blockedOnUser` and so cannot reach this.
+  ///
+  /// ADR-0019 refused a fourth value on the grounds that it would "describe a
+  /// condition nothing else distinguishes". Two things distinguish this one: the
+  /// retraction, and the card's label.
+  case blockedOnLimit
   /// The turn ended; the session is waiting for whatever the user says next.
   case turnComplete
   /// The session exists and nothing has happened in it yet.
@@ -26,10 +39,19 @@ enum Activity: String, Sendable, Hashable {
 }
 
 /// How much weight the observation carries.
+///
+/// Strength, not channel. The distinction stopped being academic when a usage
+/// limit turned out to be reported *in the transcript* — `isApiErrorMessage`
+/// with text saying the model refused (ADR-0024). Read as "where did this come
+/// from", that record is `inferred`, which would let inference produce `waiting`
+/// and collapse ADR-0012's rule that the two are not shown alike. Read as "how
+/// much is it worth", it is exactly what `reported` means.
 enum EvidenceSource: String, Sendable, Hashable {
-  /// Read off timestamps and file contents. A guess, and guesses have been wrong.
+  /// We guessed what a file implies — from timestamps, or from the shape of the
+  /// last record. Guesses have been wrong.
   case inferred
-  /// The tool said so itself.
+  /// The tool stated it: usually through a hook, and through a transcript record
+  /// flagged as an API error where no hook event exists.
   case reported
 }
 
@@ -78,6 +100,12 @@ extension Evidence {
   /// `turnInFlight` already means; a fourth value would have to be given a
   /// meaning everywhere activities are read, to describe a state nothing else
   /// distinguishes.
+  ///
+  /// The guard is `== .blockedOnUser` and not "any block", which is now
+  /// load-bearing rather than incidental: a usage limit is `blockedOnLimit`
+  /// (ADR-0024) and nothing a local process does clears one, so this must not
+  /// reach it. An MCP server restarting would otherwise flip a stalled card back
+  /// to `running` and rewrite `at` with it, resetting the elapsed time too.
   func resolvingGrant(newestChildStart: Date?) -> Evidence {
     guard activity == .blockedOnUser, let started = newestChildStart, started > at else {
       return self
@@ -97,7 +125,10 @@ extension Evidence {
     let age = now.timeIntervalSince(at)
 
     switch activity {
-    case .blockedOnUser:
+    case .blockedOnUser, .blockedOnLimit:
+      // Both are the agent stopped with work outstanding, which is what the
+      // display means by `waiting`. What differs is how the user unblocks it,
+      // and that is the label's business, not the state's (ADR-0024).
       return .waiting
 
     case .turnComplete, .opened:

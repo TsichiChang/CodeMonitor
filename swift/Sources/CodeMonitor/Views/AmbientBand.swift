@@ -50,10 +50,15 @@ final class AmbientBand {
   /// Shows, hides, and paces the band from the latest scan.
   func update(with snapshot: SessionSnapshot, enabled: Bool) {
     let now = Date()
-    // Every `waiting` drives it, because every `waiting` was reported: exactly
-    // one source can produce `blockedOnUser` (ADR-0020). This used to carry a
-    // second condition excluding guessed blocks, from when silence for 45
-    // seconds could invent one.
+    // Every `waiting` drives it, because every `waiting` was reported. This used
+    // to carry a second condition excluding guessed blocks, from when silence
+    // for 45 seconds could invent one (ADR-0020).
+    //
+    // The reason first written here was "exactly one source can produce
+    // `blockedOnUser`", which ADR-0024 made false: a usage limit reports one
+    // too, from the transcript. The condition that matters survived the change —
+    // no source *guesses* a block — so the band still lights for all of them,
+    // including the limit stalls it could not see before.
     let longest = snapshot.sessions
       .filter { $0.state == .waiting }
       .map { now.timeIntervalSince($0.lastActivity) }

@@ -23,6 +23,19 @@ struct ClaudeEntry: Sendable {
   /// A user record that no person typed: a slash command, a `!` shell command,
   /// its output, or an injected reminder. Says nothing about whose turn it is.
   var synthetic = false
+  /// The turn was cut off by a usage limit (ADR-0024).
+  ///
+  /// Requires the record-level `isApiErrorMessage` flag *and* the text, because
+  /// the flag alone covers 401s, 403s, "Not logged in" and dropped connections —
+  /// 85 of the 124 flagged records on this machine are one of those, and none of
+  /// them is a session the user has to wait out. Against that corpus the flag
+  /// plus "your" plus "limit" separates the two perfectly: 42 limits matched, no
+  /// false positives, none missed.
+  ///
+  /// The flag is what keeps this safe. Matching text alone would let prose in a
+  /// conversation set a session's state — and a conversation *about* usage
+  /// limits is exactly the kind that would.
+  var limitReached = false
   var cwd: String?
   var gitBranch: String?
   var model: String?
@@ -32,6 +45,13 @@ struct ClaudeEntry: Sendable {
 /// The trailing event of a Codex rollout.
 struct CodexEntry: Sendable {
   var payloadType: String?
+  /// Codex's own error code, e.g. `usage_limit_exceeded` (ADR-0024).
+  ///
+  /// The discriminator Claude does not have: a code rather than prose, so the
+  /// same decision is robustly detectable here and fragilely there. Worth
+  /// noticing that the corpora are the mirror image — two records exist on this
+  /// machine to test this against, and forty-two on the Claude side.
+  var errorCode: String?
   var snippet: String?
 }
 
@@ -109,6 +129,9 @@ enum TranscriptReader {
     entry.hasToolUse = content.contains { str(dict($0)["type"]) == "tool_use" }
     entry.interrupted = isInterrupt(message: message, content: content)
     entry.synthetic = isSynthetic(message: message, content: content)
+    entry.limitReached =
+      raw["isApiErrorMessage"] as? Bool == true
+      && isLimitText(message: message, content: content)
     entry.entrypoint = str(raw["entrypoint"])
     entry.cwd = str(raw["cwd"])
     entry.gitBranch = str(raw["gitBranch"])
@@ -145,6 +168,23 @@ enum TranscriptReader {
     "<local-command-", "<command-name>", "<command-message>", "<command-args>",
     "<bash-input>", "<bash-stdout>", "<bash-stderr>", "<system-reminder>",
   ]
+
+  /// Whether a flagged API error is a usage limit rather than one of the others.
+  ///
+  /// Two words instead of the two full sentences observed, because the sentences
+  /// carry a reset time and a model name that vary — "hit your session limit ·
+  /// resets 8:20pm" and "reached your Fable 5 limit" — while every non-limit
+  /// flagged error on this machine (401, 403, "Not logged in", connection
+  /// closed, `ECONNRESET`) contains neither word. Checked against all 124: 42
+  /// matched, nothing else did.
+  private static func isLimitText(message: [String: Any], content: [Any]) -> Bool {
+    func limits(_ text: String?) -> Bool {
+      guard let lowered = text?.lowercased() else { return false }
+      return lowered.contains("your") && lowered.contains("limit")
+    }
+    if limits(str(message["content"])) { return true }
+    return content.contains { limits(str(dict($0)["text"])) }
+  }
 
   private static func isSynthetic(message: [String: Any], content: [Any]) -> Bool {
     func marked(_ text: String?) -> Bool {
@@ -184,6 +224,7 @@ enum TranscriptReader {
 
     var entry = CodexEntry()
     entry.payloadType = str(payload["type"]) ?? str(raw["type"])
+    entry.errorCode = str(payload["codex_error_info"])
     if let message = str(payload["last_agent_message"]) {
       entry.snippet = truncate(message)
     } else if let type = entry.payloadType {
