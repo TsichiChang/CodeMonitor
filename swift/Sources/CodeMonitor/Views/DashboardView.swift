@@ -106,12 +106,16 @@ struct DashboardView: View {
         // same band, and a card's title lands on top of the quota rows — the
         // heading is the fixed thing here and must occlude what moves.
         //
-        // The window's own colour, not a material. A material is what kept this
-        // out of the toolbar in the first place: it renders a grey slab that no
-        // styling on the contents can remove. `windowBackgroundColor` reads as
-        // part of the window rather than as a panel floating over it, and it
-        // follows the appearance setting for free.
-        .background(Color(nsColor: .windowBackgroundColor))
+        // Not a material — a material is what kept this out of the toolbar in
+        // the first place, since it renders a grey slab no styling can remove.
+        //
+        // And not `NSColor.windowBackgroundColor` either, which was the first
+        // attempt: it names *a* window background rather than *this* window's,
+        // and in dark mode the two are different greys, so the heading sat as a
+        // visibly lighter band above the scroll area. `.background` is the
+        // semantic style for whatever the enclosing surface is painted with, so
+        // it cannot disagree with it.
+        .background(.background)
         // Animated on the column count, not the width: it should glide across
         // once when the layout actually changes, not track the cursor through
         // every intermediate width of a drag.
@@ -254,7 +258,7 @@ struct DashboardView: View {
     if !monitor.snapshot.usage.isEmpty {
       TimelineView(.periodic(from: .now, by: 5)) { context in
         content(context.date)
-          .font(.system(size: metrics.caption))
+          .font(.system(size: quotaText))
           .lineLimit(1)
       }
     }
@@ -319,7 +323,23 @@ struct DashboardView: View {
 
   /// Big enough to tell two vendors apart, small enough not to compete with the
   /// state dots beside it.
-  private var quotaIconSize: Double { metrics.caption * 1.3 }
+  private var quotaIconSize: Double { quotaText * 1.3 }
+
+  /// Type size for the whole quota block, and the unit every length in it is
+  /// stated in.
+  ///
+  /// A step above `caption`, which is what the count badges beside it use. Those
+  /// carry a tinted capsule and `.primary` text, so they read at a glance at the
+  /// same size; these are bare `.secondary` marks and did not. Making the block
+  /// *quieter* than the counts was always the intent (ADR-0007) and greys are
+  /// what deliver it — a size nobody can read is not restraint, it is the same
+  /// mistake as the first attempt's `.tertiary`.
+  ///
+  /// Everything below is a multiple of this rather than of `caption`, so the
+  /// reserved slots grow with the text. They were stated in `caption` while the
+  /// text was `caption`, and the two agreeing by coincidence is exactly the shape
+  /// that drifts: `↻4h` would have overflowed a slot sized for smaller digits.
+  private var quotaText: Double { metrics.caption * 1.15 }
 
   /// The windows of one tool, stacked, when they will not sit side by side.
   ///
@@ -350,8 +370,17 @@ struct DashboardView: View {
   private func quotaCell(_ usage: ToolUsage, minutes: Int, now: Date) -> some View {
     let reading = usage.reading(forMinutes: minutes, now: now)
     return HStack(spacing: metrics.caption * 0.45) {
+      // `.secondary` like everything else here. The floor for this block is
+      // `.secondary`, not `.tertiary`: `caption` is already 0.77 of the size
+      // ADR-0013 derived for readability, and stacking an opacity reduction on
+      // top of a size reduction puts text under the legible line twice over.
+      //
+      // Hierarchy comes from the bar being `.primary`, not from grading the text
+      // below what can be read. That was the mistake three attempts in a row —
+      // "quiet" implemented as "everything dimmer" rather than as "only the one
+      // mark that carries information is loud".
       Text(usageWindowLabel(minutes: minutes))
-        .foregroundStyle(.tertiary)
+        .foregroundStyle(.secondary)
       quotaBar(reading)
       // `↻` because a window's length and the time until it clears are the same
       // kind of token — `5h` beside `5h` for a five-hour window clearing in five
@@ -362,9 +391,13 @@ struct DashboardView: View {
       // unlimited window has none, and letting that cell collapse dragged
       // everything after it leftwards — so `7d` sat at a different x on each row
       // and two rows that should read as a column did not.
+      // `.secondary`, a step above the window label beside it. Everything in this
+      // block sat within one grey step of everything else and read as a single
+      // smear; a hierarchy needs the steps actually spent. The countdown is data,
+      // the `5h` label is scaffolding, so they do not belong at the same weight.
       Text(reading.resetsInText.map { "↻\($0)" } ?? "")
         .monospacedDigit()
-        .foregroundStyle(.tertiary)
+        .foregroundStyle(.secondary)
         .frame(width: quotaClearsWidth, alignment: .leading)
     }
     .help(quotaHelp(usage.tool, minutes, reading))
@@ -378,22 +411,35 @@ struct DashboardView: View {
   /// Wide enough that a few percent is a few pixels rather than one — the whole
   /// point of preferring a length over a number is that small values stay
   /// distinguishable from zero.
-  private var quotaBarWidth: Double { metrics.caption * 6 }
+  private var quotaBarWidth: Double { quotaText * 6 }
 
   /// Room for `↻` plus the longest countdown a window produces — `↻23h`, `↻7d`.
   /// Reserved rather than measured so every cell is the same width whether or not
   /// it has a countdown at all.
-  private var quotaClearsWidth: Double { metrics.caption * 2.6 }
+  private var quotaClearsWidth: Double { quotaText * 2.6 }
 
   @ViewBuilder
   private func quotaBar(_ reading: UsageReading) -> some View {
-    let height = max(2, metrics.hairline * 2.5)
+    // Thicker than a hairline, and stated in the block's own type size so it
+    // grows with it. At 2pt the fill and the track were two greys of a line too
+    // thin to compare, which is the whole job the bar took over from the number.
+    let height = max(3, quotaText * 0.3)
     switch reading {
     case let .spent(percent, _):
-      Capsule().fill(.quaternary)
+      // `.tertiary`, not `.quaternary`. A track nobody can see is not a track:
+      // the fill's length only means something against the full extent it could
+      // have reached, and on a dark background `.quaternary` vanished into it —
+      // leaving a line of varying length with nothing to read it against.
+      Capsule().fill(.tertiary)
         .frame(width: quotaBarWidth, height: height)
         .overlay(alignment: .leading) {
-          Capsule().fill(.secondary)
+          // `.primary`, the loudest thing in the block, because since ADR-0023
+          // chose a length over a number this fill *is* the reading — there is no
+          // digit beside it to fall back on. A 3pt line at full contrast is still
+          // quieter than a word at `.secondary`, so this does not cost the block
+          // the restraint ADR-0007 asks of it; it spends what it has on the one
+          // mark that carries information.
+          Capsule().fill(.primary)
             .frame(width: quotaBarWidth * min(1, max(0, percent / 100)), height: height)
         }
     case .unlimited, .unheard:
@@ -402,7 +448,7 @@ struct DashboardView: View {
       // to the leading edge of a wide empty slot reads as something that fell out
       // of place, where a centred one reads as this slot's content.
       Text(reading.text)
-        .foregroundStyle(.tertiary)
+        .foregroundStyle(.secondary)
         .frame(width: quotaBarWidth, alignment: .center)
     }
   }
