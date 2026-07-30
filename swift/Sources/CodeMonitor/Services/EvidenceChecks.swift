@@ -410,6 +410,8 @@ enum EvidenceChecks {
       "the value is matched whole, not searched for",
       !CodexSource.isDelegated(threadSource: "{\"subagent\":{\"other\":\"guardian\"}}"))
 
+    failures += runFoldingChecks()
+
     // The lifetime consequence, which is the whole reason the field exists.
     let desktop = Evidence(.turnInFlight, at: .distantPast, source: .inferred, liveness: .unknown)
     let terminal = Evidence(.turnInFlight, at: .distantPast, source: .inferred, liveness: .absent)
@@ -476,6 +478,58 @@ enum EvidenceChecks {
       "a later `unknown` does not displace a hook's Stop",
       SessionScanner.applying(hook(.turnComplete, ago: 600), to: session(.unknown, ago: 1))
         .evidence.activity == .turnComplete)
+    return failures
+  }
+
+  /// What folding keeps and what it drops (ADR-0026).
+  ///
+  /// The count is the subtle half: it reports sub-agents working *now*, so a batch
+  /// that has finished leaves nothing behind — no card and no badge. That is
+  /// deliberate, and it is the opposite of what the code's own comment claimed
+  /// until this ADR was written, which is why it is pinned here rather than left
+  /// to be re-derived by whoever reads the comment next.
+  static func runFoldingChecks() -> Int {
+    var failures = 0
+    func check(_ name: String, _ passed: Bool) {
+      failures += Self.report(name, passed)
+    }
+    func session(_ project: String, delegated: Bool, _ activity: Activity) -> SessionInfo {
+      var s = SessionInfo(
+        id: "codex:\(project)-\(delegated ? "d" : "h")-\(activity.rawValue)", tool: .codex,
+        projectPath: "/tmp/\(project)", workingDirectory: "/tmp/\(project)", project: project,
+        evidence: Evidence(activity, at: Date(), source: .inferred), state: .idle)
+      s.isDelegated = delegated
+      return s
+    }
+
+    let human = session("alpha", delegated: false, .turnComplete)
+    let working = session("alpha", delegated: true, .turnInFlight)
+    let finished = session("alpha", delegated: true, .turnComplete)
+
+    let withParent = SessionScanner.folding([human, working, finished], showDelegated: false)
+    check("a delegated agent never gets a card of its own", withParent.count == 1)
+    check(
+      "its parent carries the count instead",
+      withParent.first?.subagentCount == 1)
+
+    // No human session in the project at all: the parent aged out, or is an
+    // orchestrator this machine never saw.
+    let orphanWorking = SessionScanner.folding([working, finished], showDelegated: false)
+    check(
+      "a working batch with no parent is adopted so the work stays visible",
+      orphanWorking.count == 1 && orphanWorking.first?.subagentCount == 1)
+    check(
+      "and the adopted one stops counting as delegated, or it would fold again",
+      orphanWorking.first?.isDelegated == false)
+
+    // The case the old comment got wrong.
+    let orphanFinished = SessionScanner.folding([finished], showDelegated: false)
+    check(
+      "a finished batch with no parent vanishes entirely — the display is not a log",
+      orphanFinished.isEmpty)
+
+    let shown = SessionScanner.folding([human, working, finished], showDelegated: true)
+    check("the setting turns all of it off untouched", shown.count == 3)
     return failures
   }
 
