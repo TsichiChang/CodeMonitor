@@ -29,7 +29,31 @@ It is not rare. Across 857 transcripts:
 `CONTEXT.md` already defines — the agent has stopped and cannot continue without
 the user — and there is a real action: wait, switch models, or buy credits.
 
-## `isApiErrorMessage` is not the discriminator
+## Codex reports the same stall, structurally
+
+Codex records it as an error payload with a machine-readable code:
+
+```json
+{"type": "error",
+ "message": "You've hit your usage limit. Upgrade to Plus to continue using Codex
+             (…), or try again at Apr 18th, 2026 3:03 PM.",
+ "codex_error_info": "usage_limit_exceeded"}
+```
+
+`codex_error_info` is the discriminator Claude does not have — a code, not prose.
+So the same decision is **robustly** detectable for one tool and **fragilely** for
+the other, and the section below applies to Claude alone.
+
+Two smaller differences worth recording. Codex's message carries a retry time in
+human-readable form, and the machine-readable `resets_at` sits in the same
+rollout's `rate_limits` (ADR-0023) — so nothing has to be parsed out of prose.
+And `spend_control_reached` looks like a second flag and is not: it is `null` in
+all 4,258 rate-limit events on this machine.
+
+Twenty-one such events exist here, which makes the same retroactive check
+available on both sides.
+
+## `isApiErrorMessage` is not the discriminator — for Claude
 
 The flag looks like a clean hook and is not. It covers 124 records on this
 machine, and most are something else: 401 and 403 authentication failures, "Not
