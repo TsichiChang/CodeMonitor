@@ -31,6 +31,25 @@ which states a fact rather than making a claim about why.
 
 ## What this buys
 
+> **Refined by ADR-0024: the property is "only a report", not "only one
+> reporter".** A usage limit stops a session as hard as a permission prompt
+> does, and Claude Code records that in the transcript rather than through any
+> hook — `isApiErrorMessage: true`, with text saying it cannot continue. That is
+> a second producer of `blockedOnUser`, so "exactly one source" stopped being
+> true and is corrected here rather than argued around in ADR-0024.
+>
+> The half that was doing the work survives. The argument below was never
+> hook-versus-transcript; it was **reported versus guessed** — "the guess should
+> not exist". A flagged statement that the model refused is not a guess, whatever
+> channel carries it. `waiting` still cannot be invented from silence, which is
+> the property the display actually depends on.
+>
+> Two comments were written on the stronger reading and are now wrong for the
+> reason they give, though their conclusions hold: `AmbientBand` dropped its
+> second filter condition, and `Session.swift` deleted `deservesAttention`,
+> both "because every `waiting` was reported". Still true — a limit stall is
+> reported — but no longer because only one source can say so.
+
 `waiting` acquires a property none of the other states have: **exactly one
 source can produce it.** `blockedOnUser` is emitted only by the hook store, and
 `waiting` is derived only from `blockedOnUser`. Everything else — which session
